@@ -19,7 +19,9 @@ struct RouterView: View {
                     case .item:
                         CalendarItemView()
                     case .horizontal_paging:
-                        CalendarHorizontalPagingView()
+                        CalendarHorizontalPagingView(
+                            viewModel: .init(withCalendar: .current)
+                        )
                     }
                 }
         }

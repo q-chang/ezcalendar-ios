@@ -69,11 +69,12 @@ extension Date {
     }
     
     func toString(
-        dateFormat: String
+        dateFormat: String,
+        locale: Foundation.Locale = Foundation.Locale(identifier: "en_US")
     ) -> String {
         let format = DateFormatter()
         format.dateFormat = dateFormat
-        format.calendar = .init(identifier: .gregorian)
+        format.locale = locale
         return format.string(from: self)
     }
     

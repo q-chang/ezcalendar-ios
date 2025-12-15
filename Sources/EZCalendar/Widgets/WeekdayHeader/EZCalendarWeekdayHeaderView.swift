@@ -14,13 +14,14 @@ public struct EZCalendarWeekdayHeaderView<WeekdayItemView>: View where WeekdayIt
     
     init(
         weekDayTitles: [String]? = nil,
+        locale: Locale,
         @ViewBuilder weekdayItemViewContent: @escaping (String) -> WeekdayItemView
     ) {
         if let weekDayTitles {
             self.weekDayTitles = weekDayTitles
         } else {
             let formatter = DateFormatter()
-            formatter.locale = Locale.current
+            formatter.locale = locale
             self.weekDayTitles = formatter.shortWeekdaySymbols
         }
         self.weekdayItemViewContent = weekdayItemViewContent

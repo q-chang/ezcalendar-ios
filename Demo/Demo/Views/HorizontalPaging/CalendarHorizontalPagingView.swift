@@ -9,7 +9,7 @@ import SwiftUI
 import EZCalendar
 
 struct CalendarHorizontalPagingView: View {
-    @StateObject var viewModel: CalendarHorizontalPaggingViewModel = .init()
+    @StateObject var viewModel: CalendarHorizontalPaggingViewModel
     
     var body: some View {
         GeometryReader { proxy in
@@ -33,7 +33,7 @@ struct CalendarHorizontalPagingView: View {
                         
                         Spacer()
                         
-                        Text(viewModel.currentMonth.toString(dateFormat: "MMMM yyyy"))
+                        Text(viewModel.currentMonth.toString(dateFormat: "MMMM yyyy", locale: viewModel.locale))
                         
                         Spacer()
                         
@@ -56,6 +56,7 @@ struct CalendarHorizontalPagingView: View {
                     
                     EZCalendarHorizontalPagingView(
                         withCalendar: viewModel.calendar,
+                        locale: viewModel.locale,
                         currentMonth: $viewModel.currentMonth,
                         calendarMonths: $viewModel.calendarMonths
                     ) { weekdayTitle in
@@ -92,5 +93,10 @@ struct CalendarHorizontalPagingView: View {
 }
 
 #Preview {
-    CalendarHorizontalPagingView()
+    CalendarHorizontalPagingView(
+        viewModel: CalendarHorizontalPaggingViewModel(
+            withCalendar: .init(identifier: .buddhist),
+            locale: Locale(identifier: "th-TH")
+        )
+    )
 }

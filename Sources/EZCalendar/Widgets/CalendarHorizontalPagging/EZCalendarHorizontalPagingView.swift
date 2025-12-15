@@ -11,6 +11,7 @@ public struct EZCalendarHorizontalPagingView<WeekdayItemView, DayItemView>: View
 where WeekdayItemView: View, DayItemView: View {
     
     var calendar: Calendar
+    var locale: Locale
     @State var activeCalendarMonthHash: String? = nil
     @Binding public var currentMonth: Date
     @Binding public var calendarMonths: [CalendarMonth]
@@ -20,12 +21,14 @@ where WeekdayItemView: View, DayItemView: View {
     
     public init(
         withCalendar calendar: Calendar,
+        locale: Locale,
         currentMonth: Binding<Date>,
         calendarMonths: Binding<[CalendarMonth]>,
         @ViewBuilder weekdayItemViewContent: @escaping (String) -> WeekdayItemView,
         @ViewBuilder dayItemViewContent: @escaping (CalendarDay) -> DayItemView
     ) {
         self.calendar = calendar
+        self.locale = locale
         self._currentMonth = currentMonth
         self._calendarMonths = calendarMonths
         self.weekdayItemViewContent = weekdayItemViewContent
@@ -54,7 +57,7 @@ where WeekdayItemView: View, DayItemView: View {
         VStack(spacing: 0) {
             
             if !isWeekdayScrollable {
-                EZCalendarWeekdayHeaderView(weekdayItemViewContent: weekdayItemViewContent)
+                EZCalendarWeekdayHeaderView(locale: locale, weekdayItemViewContent: weekdayItemViewContent)
             }
             ScrollView(.horizontal) {
                 LazyHStack(alignment: .top, spacing: 0) {
@@ -63,7 +66,7 @@ where WeekdayItemView: View, DayItemView: View {
                             VStack(spacing: 0) {
                                 
                                 if isWeekdayScrollable {
-                                    EZCalendarWeekdayHeaderView(weekdayItemViewContent: weekdayItemViewContent)
+                                    EZCalendarWeekdayHeaderView(locale: locale, weekdayItemViewContent: weekdayItemViewContent)
                                 }
                                 
                                 EZCalendarItemView(
