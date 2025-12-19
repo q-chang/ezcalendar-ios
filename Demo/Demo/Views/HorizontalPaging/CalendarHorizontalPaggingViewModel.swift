@@ -11,20 +11,20 @@ import EZCalendar
 class CalendarHorizontalPaggingViewModel: ObservableObject {
     
     @Published var calendar: Calendar
-    @Published var locale: Locale
+    @Published var weekdayTitles: [String]
     @Published var startDate: Date
     @Published var endDate: Date
     @Published var currentMonth: Date
     
     @Published var calendarMonths: [CalendarMonth]
     
-    init(withCalendar calendar: Calendar = Calendar.init(identifier: .gregorian), locale: Locale = Locale.current) {
+    init(withCalendar calendar: Calendar = Calendar.init(identifier: .gregorian)) {
         let nowComponents = calendar.dateComponents([.year, .month], from: Date())
         let startDate = Date.from(year: nowComponents.year!, month: 1, day: 1, calendar: calendar)!
         let endDate = Date.from(year: nowComponents.year! + 100, month: 12, day: 30, calendar: calendar)!
         
         self.calendar = calendar
-        self.locale = locale
+        self.weekdayTitles = calendar.veryShortWeekdaySymbols
         self.startDate = startDate
         self.endDate = endDate
         self.currentMonth = Date.from(year: nowComponents.year!, month: nowComponents.month!, day: 1, calendar: calendar)!

@@ -33,7 +33,7 @@ struct CalendarHorizontalPagingView: View {
                         
                         Spacer()
                         
-                        Text(viewModel.currentMonth.toString(dateFormat: "MMMM yyyy", locale: viewModel.locale))
+                        Text(viewModel.currentMonth.toString(dateFormat: "MMMM yyyy", locale: viewModel.calendar.locale!))
                         
                         Spacer()
                         
@@ -56,7 +56,7 @@ struct CalendarHorizontalPagingView: View {
                     
                     EZCalendarHorizontalPagingView(
                         withCalendar: viewModel.calendar,
-                        locale: viewModel.locale,
+                        weekDayTitles: viewModel.weekdayTitles,
                         currentMonth: $viewModel.currentMonth,
                         calendarMonths: $viewModel.calendarMonths
                     ) { weekdayTitle in
@@ -95,8 +95,11 @@ struct CalendarHorizontalPagingView: View {
 #Preview {
     CalendarHorizontalPagingView(
         viewModel: CalendarHorizontalPaggingViewModel(
-            withCalendar: .init(identifier: .buddhist),
-            locale: Locale(identifier: "th-TH")
+            withCalendar: {
+                var calendar: Calendar = .init(identifier: .buddhist)
+                calendar.locale = Locale(identifier: "th-TH")
+                return calendar
+            }()
         )
     )
 }

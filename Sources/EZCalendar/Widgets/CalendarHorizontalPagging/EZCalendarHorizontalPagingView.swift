@@ -12,6 +12,7 @@ where WeekdayItemView: View, DayItemView: View {
     
     var calendar: Calendar
     var locale: Locale
+    var weekDayTitles: [String]?
     @State var activeCalendarMonthHash: String? = nil
     @Binding public var currentMonth: Date
     @Binding public var calendarMonths: [CalendarMonth]
@@ -21,14 +22,15 @@ where WeekdayItemView: View, DayItemView: View {
     
     public init(
         withCalendar calendar: Calendar,
-        locale: Locale,
+        weekDayTitles: [String]? = nil,
         currentMonth: Binding<Date>,
         calendarMonths: Binding<[CalendarMonth]>,
         @ViewBuilder weekdayItemViewContent: @escaping (String) -> WeekdayItemView,
         @ViewBuilder dayItemViewContent: @escaping (CalendarDay) -> DayItemView
     ) {
         self.calendar = calendar
-        self.locale = locale
+        self.locale = calendar.locale ?? Locale.current
+        self.weekDayTitles = weekDayTitles
         self._currentMonth = currentMonth
         self._calendarMonths = calendarMonths
         self.weekdayItemViewContent = weekdayItemViewContent
@@ -57,7 +59,7 @@ where WeekdayItemView: View, DayItemView: View {
         VStack(spacing: 0) {
             
             if !isWeekdayScrollable {
-                EZCalendarWeekdayHeaderView(locale: locale, weekdayItemViewContent: weekdayItemViewContent)
+                EZCalendarWeekdayHeaderView(weekDayTitles: weekDayTitles, locale: locale, weekdayItemViewContent: weekdayItemViewContent)
             }
             ScrollView(.horizontal) {
                 LazyHStack(alignment: .top, spacing: 0) {
@@ -66,7 +68,7 @@ where WeekdayItemView: View, DayItemView: View {
                             VStack(spacing: 0) {
                                 
                                 if isWeekdayScrollable {
-                                    EZCalendarWeekdayHeaderView(locale: locale, weekdayItemViewContent: weekdayItemViewContent)
+                                    EZCalendarWeekdayHeaderView(weekDayTitles: weekDayTitles, locale: locale, weekdayItemViewContent: weekdayItemViewContent)
                                 }
                                 
                                 EZCalendarItemView(
