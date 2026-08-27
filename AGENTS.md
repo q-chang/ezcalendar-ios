@@ -10,7 +10,7 @@ values; every pixel comes from a caller-supplied `@ViewBuilder`.
 | Platforms | iOS 17+, macOS 15+ |
 | Toolchain | swift-tools-version 6.0, Swift 6 language mode |
 | Dependencies | none |
-| Tests | **none** |
+| Tests | `swift test` — agenda logic only; the month grid is still untested |
 
 ---
 
@@ -21,7 +21,7 @@ debugging time.
 
 1. **`swift build` is the only build that works.** `xcodebuild -scheme EZCalendar` has been broken since commit `9dfad87` — a deleted file is still listed in the pbxproj. It is not your change.
 2. **The Demo app does not build this repo's sources.** `Demo/Demo.xcodeproj` links a *sibling checkout* at `../../EZCalendar-Swift`, a different clone with a different remote. A green Demo build proves nothing about your change.
-3. **There are no tests.** Date-math changes need the `verify-calendar-grid` harness. Never commit a test target unless asked.
+3. **Tests cover the agenda only.** `Tests/EZCalendarTests/` exercises `EZCalendarAgendaView`'s logic. `EZCalendarItemViewModel`'s month-grid math has no tests — changes there still need the `verify-calendar-grid` harness. Don't add a test target for anything else unless asked.
 4. **`public` does not mean callable.** Several public types have internal members — `EZCalendarItemView.gridLineColor`, `EZCalendarWeekdayHeaderView.init`, and the whole `Date` extension. Verify from an external module before documenting API.
 
 Full detail and reproductions: [docs/agent-knowledge/landmines.md](docs/agent-knowledge/landmines.md).
@@ -32,12 +32,14 @@ Full detail and reproductions: [docs/agent-knowledge/landmines.md](docs/agent-kn
 
 ```bash
 swift build                             # after every source change
+swift test                              # agenda logic suite
 scripts/demo/run-demo.sh                # build + boot simulator + install + launch
 scripts/demo/run-demo.sh --build-only   # iOS compile check only
 ```
 
-Before reporting a change complete: `swift build` clean → grid harness if date
-math changed → external-module compile check if public API changed.
+Before reporting a change complete: `swift build` clean → `swift test` green →
+grid harness if month-grid date math changed → external-module compile check if
+public API changed.
 
 ---
 

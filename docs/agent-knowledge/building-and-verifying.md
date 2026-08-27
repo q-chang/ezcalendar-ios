@@ -1,6 +1,8 @@
 # Building and verifying
 
-**This repository ships no tests.** There is no `Tests/` directory and no test
+**The month grid still ships no tests.** `Tests/EZCalendarTests/` covers
+`EZCalendarAgendaView`'s logic (`swift test`), but nothing exercises
+`EZCalendarItemViewModel`'s grid generation. For that there is no test
 target in `Package.swift`. Everything below exists because of that.
 
 ## The one command that always applies

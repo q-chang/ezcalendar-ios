@@ -23,5 +23,5 @@ If you read nothing else:
 
 1. **`swift build` is the only build that works.** `xcodebuild -scheme EZCalendar` has been broken since commit `9dfad87`.
 2. **The Demo app does not build this repo's sources.** It links a sibling checkout at `../../EZCalendar-Swift`.
-3. **There are no tests.** Date-math changes need the `verify-calendar-grid` harness.
+3. **Tests cover the agenda only.** `swift test` runs `Tests/EZCalendarTests/`. Month-grid date-math changes still need the `verify-calendar-grid` harness.
 4. **`public` does not mean callable.** Several public types have internal members.

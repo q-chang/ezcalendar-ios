@@ -14,7 +14,7 @@ caller-supplied `@ViewBuilder`.
 | Platforms | iOS 17+, macOS 15+ |
 | Toolchain | swift-tools-version 6.0, Swift 6 language mode |
 | Dependencies | none — Foundation and SwiftUI only |
-| Tests | **none** — see [building-and-verifying.md](building-and-verifying.md) |
+| Tests | `Tests/EZCalendarTests/` — agenda logic only; the month grid is untested, see [building-and-verifying.md](building-and-verifying.md) |
 | Latest tag | `1.3.1` (2026-02-10) |
 
 ## Design commitments
@@ -45,6 +45,13 @@ Views never impose a frame. Callers size cells, typically `proxy.size.width / 7`
 under a `GeometryReader`. A view in this package that calls `.frame(width:height:)`
 on its own content is a bug.
 
+⚠️ **One documented exception.** `AgendaCalendarView` puts a `.frame(height:)`
+clipping window around the calendar, because a month cannot animate down to a
+single week without one. The height is never a constant: the grid reports its own
+natural height through `AgendaGridHeightKey`, and the row height is divided back
+out of it. Before the first measurement arrives the height is `nil` and the grid
+sizes itself. Adding a *constant* frame anywhere is still a bug.
+
 ## Data flow
 
 ```
@@ -61,6 +68,11 @@ EZCalendarItemView             (public)    ← LazyVGrid, one month
         │
         ▼
 EZCalendarHorizontalPagingView (public)    ← paged strip + weekday header
+
+        └─────────────────────────────────► EZCalendarAgendaView (public)
+                                              ← re-lays the same weeks row by
+                                                row so they can fade and slide,
+                                                over a date-grouped event list
 ```
 
 `CalendarMonth` carries `month`/`year` as **integers in the era of the injected
@@ -70,7 +82,7 @@ is `CalendarMonth(month: 1, year: 2569)`. This trips people up regularly.
 ## File layout
 
 ```
-Package.swift                     tools 6.0, single library target
+Package.swift                     tools 6.0, library + test target
 README.md                         user-facing docs — keep in sync with public API
 AGENTS.md                         lean agent entry point (CLAUDE.md symlinks here)
 docs/agent-knowledge/             this directory
@@ -95,6 +107,17 @@ Sources/EZCalendar/
       EZCalendarWeekdayHeaderView.swift  public type, INTERNAL init
     CalendarHorizontalPagging/         (sic — misspelled, leave it)
       EZCalendarHorizontalPagingView.swift  the pager (public)
+    CalendarAgenda/
+      EZCalendarAgendaView.swift          collapsible calendar + list (public)
+      EZCalendarAgendaViewModel.swift     its state machine (internal, @MainActor)
+      EZCalendarAgendaLogic.swift       ★ its pure date + geometry math (internal)
+      EZCalendarAgendaModels.swift        day context, section, title context
+      EZCalendarAgendaMode.swift          .monthly / .weekly
+      EZCalendarAgendaPaging.swift        programmatic paging helper (public)
+      Subviews/                           calendar, list, rows, preference keys
+
+Tests/EZCalendarTests/            Swift Testing suites over EZCalendarAgendaLogic
+                                  and EZCalendarAgendaViewModel
 
 Demo/                             sample app — links a SIBLING checkout, not this
                                   repo. See landmines.md #1.
@@ -103,7 +126,9 @@ EZCalendar.xcworkspace            wraps Demo + EZCalendar projects
 ```
 
 `Sources/EZCalendar/Widgets/CalendarItem/EZCalendarItemViewModel.swift` is the
-file that matters. Everything else is plumbing around it.
+file that matters. Everything else is plumbing around it — including
+`EZCalendarAgendaView`, which consumes the very same `[CalendarWeek]` grid rather
+than computing one of its own.
 
 ## A note on the source doc comments
 

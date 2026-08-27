@@ -60,6 +60,7 @@ EZCalendarItemView                      ← LazyVGrid, one month
         │
         ▼
 EZCalendarHorizontalPagingView          ← swipeable strip of months + weekday header
+EZCalendarAgendaView                    ← collapsible calendar + synced event list
 ```
 
 The grid logic is deliberately separated from rendering, so `EZCalendarItemView` composes into a vertical `ScrollView`, a `TabView`, or anything else just as easily as into the built-in pager.
@@ -271,6 +272,77 @@ public init(
 
 ---
 
+### `EZCalendarAgendaView`
+
+A collapsible calendar stacked on a continuous, date-grouped event list, kept in sync in both directions.
+
+```
+┌─────────────────────────────┐
+│  ‹   July 2569   ›          │  titleViewContent
+│  Su Mo Tu We Th Fr Sa       │  weekdayItemViewContent
+│  30  1  2 [3] 4  5  6       │  dayItemViewContent
+│   7  8  9 10 11 12 13       │  … collapses to a single week
+├─────────────────────────────┤
+│            ▭                │  handleViewContent
+│  Wednesday, 3 July 2569     │  listHeaderViewContent  (sticky)
+│    09:00  Install job       │  eventItemViewContent
+└─────────────────────────────┘
+```
+
+```swift
+@State private var mode: EZCalendarAgendaMode = .monthly
+@State private var selectedDate = Date()
+@State private var months: [CalendarMonth] = []
+
+EZCalendarAgendaView(
+    withCalendar: calendar,
+    mode: $mode,
+    selectedDate: $selectedDate,
+    calendarMonths: $months,
+    events: jobs,                     // your own Identifiable type
+    eventDate: { $0.scheduledAt },    // which day each event belongs to
+    weekdayItemViewContent: { Text($0).frame(maxWidth: .infinity) },
+    dayItemViewContent: { context in
+        DayCell(context)              // .isSelected, .isToday, .hasEvents
+    },
+    listHeaderViewContent: { section in
+        Text(headerFormatter.string(from: section.date))
+    },
+    eventItemViewContent: { job in
+        JobRow(job)
+    }
+)
+.gridLineColor(.secondary.opacity(0.1))
+```
+
+The longer initializer adds `titleViewContent`, `emptyDayViewContent` and `handleViewContent`.
+
+**Behavior**
+
+| Interaction | Result |
+| --- | --- |
+| Tap a day | The list scrolls that day's sticky header to the top. In `.monthly` the tap also snaps the calendar to `.weekly`. |
+| Scroll the list | Whichever sticky header is pinned at the top becomes the selected day; the calendar pages itself to follow. |
+| Scroll up out of `.monthly` | The calendar collapses, non-selected weeks fading as it closes. Over-scrolling the top of `.weekly` expands it again. |
+| Swipe the calendar in `.monthly` | Selects the 1st of the new month — or today, if today falls in it. |
+| Swipe the calendar in `.weekly` | Selects the week's first day — or today, if today falls in that week. |
+
+Page it programmatically with `EZCalendarAgendaPaging.selection(paging:from:mode:calendarMonths:calendar:)`, or from your own title bar with the `pageForward()` / `pageBackward()` closures on `EZCalendarAgendaTitleContext`.
+
+**Modifiers**
+
+| Modifier | Default | Effect |
+| --- | --- | --- |
+| `.gridLineColor(_:)` | `nil` | Colour showing through the grid's 1pt gaps. |
+| `.collapseThreshold(_:)` | `100` | Points of drag or scroll that make a full collapse or expand. |
+| `.collapseAnimation(_:)` | `.snappy(duration: 0.28)` | How a released gesture settles. |
+
+> **Use `context.hasEvents`, not `context.day.hasEvents`.** The agenda buckets your events by *day*, so its flag works for events stamped at a real time and for padding days — neither of which `CalendarDay.hasEvents` handles. See limitation 2 below.
+
+> `selectedDate` is normalised to the start of its day in the view's calendar. Events outside `calendarMonths` still appear in the list, which spans the months unioned with your event dates.
+
+---
+
 ## 🌍 Localization & calendar systems
 
 Everything flows from the `Calendar` you pass in — including weekday names, which are read from `calendar.locale`:
@@ -361,13 +433,23 @@ These are current, verified behaviors — worth knowing before you build around 
 | # | Behavior | Impact |
 | --- | --- | --- |
 | 1 | **`calendar.firstWeekday` is ignored.** The grid and the header are always Sunday-first, regardless of the calendar's setting. | Monday-first regions (most of Europe) get a Sunday-first grid. |
-| 2 | **Padding days never carry events.** `hasEvents` is only computed for days inside the month; leading/trailing cells are always `false`. | An event on a visible adjacent-month cell shows no indicator. |
+| 2 | **Padding days never carry events.** `hasEvents` is only computed for days inside the month; leading/trailing cells are always `false`. | An event on a visible adjacent-month cell shows no indicator. `EZCalendarAgendaView` is exempt — its `EZCalendarDayContext.hasEvents` is computed separately. |
 | 3 | **`generateCalendarMonths(events:)` is ignored.** The argument is accepted but never written into the returned months. | Attach events by replacing elements of `calendarMonths` instead. |
 | 4 | **`CalendarMonth.hashString` changes when `events` change.** It is the pager's scroll-position identity. | Injecting events into the visible month can disturb scroll position. Prefer loading events for a month before it scrolls into view. |
 | 5 | **`EZCalendarItemView.gridLineColor(_:)` is internal.** | Not callable outside the package. Only the pager exposes it publicly. |
 | 6 | **`EZCalendarWeekdayHeaderView`'s initializer is internal.** | The type is public but cannot be constructed by consumers; use it via the pager. |
 | 7 | **The `Date` extension is internal.** `Date.from(year:month:day:)`, `.get(_:)`, `.startOfMonth` etc. are not part of the public API. | Use `Calendar` and `DateComponents` directly in your app. |
 | 8 | **`Date.startOfMonth` / `.endOfMonth` hardcode the Gregorian calendar.** | Fine for Gregorian and Buddhist (identical month boundaries); wrong for Hijri, Hebrew, and similar. |
+
+---
+
+## ✅ Tests
+
+```bash
+swift test
+```
+
+The suite covers `EZCalendarAgendaView`'s logic — page building, selection rules, event bucketing, the two-way sync, and the collapse geometry. The month-grid date math in `EZCalendarItemViewModel` remains untested; verify changes to it by dumping grids (see `docs/agent-knowledge/building-and-verifying.md`).
 
 ---
 
