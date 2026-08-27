@@ -4,6 +4,38 @@
 
 There are no built-in colors, fonts, or cell designs. That is the point.
 
+<table>
+  <tr>
+    <td align="center" width="25%">
+      <img src="docs/assets/day-items-demo.png" width="200" alt="Three month grids stacked in a scroll view, rendered as plain day numbers with adjacent-month days dimmed">
+    </td>
+    <td align="center" width="25%">
+      <img src="docs/assets/horizontal-paging-demo.png" width="200" alt="A single swipeable month with Previous and Next buttons and a red weekday header">
+    </td>
+    <td align="center" width="25%">
+      <img src="docs/assets/agenda-monthly-demo.png" width="200" alt="A full month grid with event dots, above a date-grouped event list with sticky headers">
+    </td>
+    <td align="center" width="25%">
+      <img src="docs/assets/agenda-weekly-demo.png" width="200" alt="The same calendar collapsed to a single week, with the event list taking the freed height">
+    </td>
+  </tr>
+  <tr>
+    <td align="center"><code>EZCalendarItemView</code></td>
+    <td align="center"><code>EZCalendarHorizontalPagingView</code></td>
+    <td align="center" colspan="2"><code>EZCalendarAgendaView</code></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>One month as a grid</sub></td>
+    <td align="center"><sub>Swipe between months</sub></td>
+    <td align="center"><sub><code>.monthly</code></sub></td>
+    <td align="center"><sub><code>.weekly</code></sub></td>
+  </tr>
+</table>
+
+The last two are the same day, before and after the collapse: drag the handle and the month closes onto its selected week, handing the freed height to the list.
+
+> Every pixel above comes from the Demo app's own `@ViewBuilder` closures — the red weekday letters, the event dots, the card styling. The library supplied only the dates and the layout.
+
 ---
 
 ## ⚙️ Requirements
@@ -227,6 +259,12 @@ public static func generateCalendarMonths(
 
 One month as a 7-column `LazyVGrid`.
 
+<p align="center">
+  <img src="docs/assets/day-items-demo.png" width="240" alt="Three month grids stacked vertically, each showing plain day numbers with adjacent-month padding days dimmed">
+  <br>
+  <sub>Three of them stacked in a <code>ScrollView</code>. Cells are unstyled <code>Text</code>; padding days are dimmed by the caller reading <code>isCurrentMonth</code>.</sub>
+</p>
+
 ```swift
 public init(
     _ calendarMonth: CalendarMonth,
@@ -244,6 +282,12 @@ Rows are 5 or 6 depending on the month; every row always has 7 cells. Grid spaci
 ### `EZCalendarHorizontalPagingView`
 
 A horizontally paged strip of months, snapped with `.scrollTargetBehavior(.viewAligned)`.
+
+<p align="center">
+  <img src="docs/assets/horizontal-paging-demo.png" width="240" alt="August 2026 with Previous and Next buttons above a red weekday header and a month grid">
+  <br>
+  <sub>The weekday header scrolls with each page here (<code>.weekdayScrollable(true)</code>). Previous/Next drive the <code>currentMonth</code> binding.</sub>
+</p>
 
 ```swift
 public init(
@@ -275,6 +319,25 @@ public init(
 ### `EZCalendarAgendaView`
 
 A collapsible calendar stacked on a continuous, date-grouped event list, kept in sync in both directions.
+
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <img src="docs/assets/agenda-monthly-demo.png" width="240" alt="August 2026 grid with blue event dots and today circled, above a list grouped by date with sticky headers and event cards">
+    </td>
+    <td align="center" width="50%">
+      <img src="docs/assets/agenda-weekly-demo.png" width="240" alt="The same view collapsed to the week of 23 to 29 August, the event list now filling most of the screen">
+    </td>
+  </tr>
+  <tr>
+    <td align="center"><code>.monthly</code></td>
+    <td align="center"><code>.weekly</code></td>
+  </tr>
+</table>
+
+<sub>The same selected day (27 August) either side of the collapse — only the calendar's height changes, and the list keeps its position. Dots mark days with events, including the dimmed adjacent-month days. The pill under the grid is the drag handle.</sub>
+
+The slots, and who fills them:
 
 ```
 ┌─────────────────────────────┐
