@@ -21,6 +21,7 @@ debugging session on a bug you did not write.
 | [10](#10-dateswift-exists-twice) | `Date+.swift` exists twice | 🟡 edit the wrong one |
 | [11](#11-geometry-probes-go-silent-off-screen) | Off-screen `GeometryReader`s stop reporting | 🔴 silent dead feature |
 | [12](#12-scrollto-into-a-long-lazyvstack-lands-approximately) | `scrollTo` lands short in a long `LazyVStack` | 🟠 wrong output |
+| [13](#13-a-draggesture-on-a-view-the-drag-moves-damps-itself) | A `DragGesture` on a view the drag moves damps itself | 🟠 wrong output |
 
 ---
 
@@ -269,3 +270,40 @@ Reproduced by tapping 5 August and landing on 4 August.
 target is materialised — at which point the estimate is exact — with a capped
 number of attempts so an unreachable target (the last day in the range) cannot
 wedge the sync latch open.
+
+
+---
+
+## 13. A `DragGesture` on a view the drag moves damps itself
+
+`DragGesture` reports `translation` in the coordinate space of **the view it is
+attached to**. If that view moves in response to the drag, its movement is
+subtracted from the reading, and the gesture quietly measures short.
+
+`EZCalendarAgendaView`'s grab handle sits directly under the calendar, so
+collapsing the calendar pulls the handle up — under the finger doing the
+collapsing. With the default (local) space:
+
+```swift
+// ❌ self-damping: the handle rises as the calendar closes
+DragGesture(minimumDistance: 1)
+```
+
+a 150pt finger movement reported **−75**. The commit threshold silently needed
+about twice the distance the caller configured, and the damping is not even
+linear — it depends on how much calendar is left to close.
+
+```swift
+// ✅ measured against something that does not move
+DragGesture(minimumDistance: 1, coordinateSpace: .global)
+```
+
+**This fails quietly in the worst way**: the gesture still works, still tracks,
+still commits — just at the wrong distance. It reads as "the threshold feels too
+stiff" rather than as a bug, and tuning the threshold to compensate would bake
+the error in. It was found by rendering `value.translation.height` into an
+on-screen overlay (see #11 — the same technique, for the same reason).
+
+Anything else that drags a view whose position depends on the drag — a sheet, a
+resizable pane, a pull-to-reveal header — has this bug unless it names a fixed
+coordinate space.

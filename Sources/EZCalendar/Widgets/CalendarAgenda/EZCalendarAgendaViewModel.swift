@@ -22,11 +22,11 @@ import SwiftUI
  ## The one number that drives every animation
 
  `progress` is `0` when the calendar is a full month and `1` when it is a single
- week. It is only ever set to one end or the other and animated between them, so
- a handle drag and a programmatic `mode` change share one transition path.
+ week. A live handle drag writes it continuously so the calendar tracks the
+ finger; releasing the drag, or changing `mode` programmatically, animates it to
+ one end or the other.
 
- Nothing tracks the finger continuously, and the agenda list cannot change the
- mode at all — scrolling it only scrolls it.
+ The agenda list cannot change the mode at all — scrolling it only scrolls it.
 
  ## The two latches
 
@@ -50,7 +50,7 @@ final class EZCalendarAgendaViewModel: ObservableObject {
 
     let calendar: Calendar
 
-    /// How far the grab handle must be dragged to switch modes.
+    /// How far the grab handle must be dragged, on release, to commit a switch.
     /// Caller-tunable through `.collapseThreshold(_:)`.
     var collapseThreshold: Double = 100
 
@@ -122,9 +122,6 @@ final class EZCalendarAgendaViewModel: ObservableObject {
 
     /// Scroll offset the list last reported, and the offset it was resting at
     /// when the current mode settled. The collapse is driven by the difference.
-    /// `true` once the current handle drag has already switched modes, so the
-    /// rest of that drag is ignored.
-    private var hasSnappedThisDrag = false
 
     /// Re-issues left for the current scroll. See `correctScroll(towards:)`.
     private var scrollCorrectionsRemaining = 0
@@ -342,32 +339,49 @@ final class EZCalendarAgendaViewModel: ObservableObject {
     // top could expand it, neither of which the user asked for. Scrolling the
     // list now only ever scrolls the list.
 
-    /// Live drag on the grab handle.
+    /// Live drag on the grab handle: the calendar follows the finger.
     ///
-    /// Snaps the moment the drag passes the threshold, mid-gesture, rather than
-    /// interpolating the calendar against the finger — see
-    /// `EZCalendarAgendaLogic.mode(forHandleTranslation:from:threshold:)` for why.
-    /// Once it has snapped it ignores the rest of the drag, so one long sweep
-    /// cannot flip the mode back and forth under a still-moving finger.
+    /// This only previews. Nothing is committed until the finger lifts, so a
+    /// drag can be taken anywhere and abandoned, and `mode` is stable throughout —
+    /// which is what lets the mapping below use it as a fixed starting point.
     func handleDragChanged(translation: Double) {
-        guard !hasSnappedThisDrag else { return }
+        progress = EZCalendarAgendaLogic.progress(
+            forHandleTranslation: translation,
+            from: mode,
+            travel: interactiveTravel
+        )
+    }
 
+    /// Released handle drag: commit past the threshold, otherwise spring back.
+    func handleDragEnded(translation: Double) {
         let resolved = EZCalendarAgendaLogic.mode(
             forHandleTranslation: translation,
             from: mode,
             threshold: collapseThreshold
         )
 
-        guard resolved != mode else { return }
-
-        hasSnappedThisDrag = true
-        mode = resolved
+        if resolved != mode {
+            // `modeChanged()` animates whatever is left of the way there.
+            mode = resolved
+        } else {
+            withAnimation(collapseAnimation) {
+                progress = mode.progress
+            }
+        }
     }
 
-    /// Released handle drag. There is nothing to settle — the snap already
-    /// happened, or the drag never earned one — so this only re-arms the gesture.
-    func handleDragEnded(translation: Double) {
-        hasSnappedThisDrag = false
+    /// How far the handle must travel to close the calendar completely: the
+    /// height the grid actually loses, month minus one week row.
+    ///
+    /// Measured, never assumed — the caller decides how tall a day cell is. Until
+    /// the first measurement lands there is nothing to map against, so the
+    /// commit threshold stands in; the gesture still works on the very first
+    /// frame, it just is not yet 1:1 with the content.
+    private var interactiveTravel: Double {
+        guard let page = visibleMonthPage else { return collapseThreshold }
+
+        let distance = fullGridHeight(for: page) - rowHeight(for: page)
+        return distance > 0 ? distance : collapseThreshold
     }
 
     // MARK: - Horizontal paging
@@ -414,24 +428,42 @@ final class EZCalendarAgendaViewModel: ObservableObject {
         selection = newSelection
     }
 
-    /// Scrolls whichever pager is on screen to the page holding `date`.
+    /// Puts **both** pagers on the page holding `date`.
+    ///
+    /// The off-screen one matters as much as the visible one. An interactive
+    /// collapse reveals the month pager the instant `progress` drops below 1 —
+    /// mid-gesture, long before any mode change could fix it up — so if it were
+    /// only synced on mode changes, dragging open a week that the list had
+    /// scrolled into a different month would reveal the wrong month and then
+    /// jump. The visible pager animates to its page; the hidden one is simply
+    /// placed there.
     func syncPager(to date: Date, mode: EZCalendarAgendaMode) {
-        switch mode {
-        case .monthly:
-            guard let index = EZCalendarAgendaLogic.index(ofMonthContaining: date, in: monthPages, calendar: calendar) else { return }
+        if let index = EZCalendarAgendaLogic.index(ofMonthContaining: date, in: monthPages, calendar: calendar) {
             let id = monthPages[index].id
-            guard id != visibleMonthID else { return }
 
-            holdPagerLatch()
-            withAnimation { visibleMonthID = id }
+            if id != visibleMonthID {
+                holdPagerLatch()
 
-        case .weekly:
-            guard let index = EZCalendarAgendaLogic.index(ofWeekContaining: date, in: weekPages, calendar: calendar) else { return }
+                if mode == .monthly {
+                    withAnimation { visibleMonthID = id }
+                } else {
+                    visibleMonthID = id
+                }
+            }
+        }
+
+        if let index = EZCalendarAgendaLogic.index(ofWeekContaining: date, in: weekPages, calendar: calendar) {
             let id = weekPages[index].id
-            guard id != visibleWeekID else { return }
 
-            holdPagerLatch()
-            withAnimation { visibleWeekID = id }
+            if id != visibleWeekID {
+                holdPagerLatch()
+
+                if mode == .weekly {
+                    withAnimation { visibleWeekID = id }
+                } else {
+                    visibleWeekID = id
+                }
+            }
         }
     }
 

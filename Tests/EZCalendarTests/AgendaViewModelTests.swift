@@ -105,85 +105,151 @@ struct AgendaViewModelTests {
     }
 
     // MARK: - Collapsing by dragging the handle
+    //
+    // Unmeasured, `interactiveTravel` falls back to the commit threshold, so in
+    // these tests one point of drag is one hundredth of the collapse.
 
-    @Test("A handle drag past the threshold snaps mid-gesture, without waiting for release")
-    func handleDragSnapsMidGesture() {
+    @Test("The calendar follows the finger while the handle is held")
+    func dragTracksTheFinger() {
         let viewModel = makeViewModel(mode: .monthly)
+
+        viewModel.handleDragChanged(translation: -25)
+        #expect(abs(viewModel.progress - 0.25) < 0.000_001)
 
         viewModel.handleDragChanged(translation: -60)
-        #expect(viewModel.mode == .monthly)
+        #expect(abs(viewModel.progress - 0.6) < 0.000_001)
 
-        // The switch lands on the frame the threshold is crossed — the user does
-        // not have to lift their finger to find out whether it took.
-        viewModel.handleDragChanged(translation: -110)
-        #expect(viewModel.mode == .weekly)
+        // Following the finger is a preview; nothing is decided yet.
+        #expect(viewModel.mode == .monthly)
     }
 
-    @Test("A handle drag that stops short leaves the calendar exactly as it was")
-    func shortHandleDragDoesNothing() {
+    @Test("Dragging past the threshold still commits nothing until release")
+    func nothingCommitsMidGesture() {
         let viewModel = makeViewModel(mode: .monthly)
 
-        viewModel.handleDragChanged(translation: -70)
-        viewModel.handleDragEnded(translation: -70)
+        viewModel.handleDragChanged(translation: -400)
 
-        #expect(viewModel.mode == .monthly)
-        // Nothing to spring back from: the calendar never left its resting state.
-        #expect(viewModel.progress == 0)
-    }
-
-    @Test("One long sweep switches once, not back and forth")
-    func oneDragSwitchesOnce() {
-        let viewModel = makeViewModel(mode: .monthly)
-
-        // A continuing drag keeps reporting a growing translation. Each frame
-        // past the threshold must not re-trigger the switch.
-        for distance in stride(from: -110.0, through: -400.0, by: -30.0) {
-            viewModel.handleDragChanged(translation: distance)
-        }
-
-        #expect(viewModel.mode == .weekly)
-
-        // `progress` is animated by `modeChanged()`, which the view drives off
-        // `onChange(of: viewModel.mode)`; there is no view here.
-        viewModel.modeChanged()
         #expect(viewModel.progress == 1)
+        #expect(viewModel.mode == .monthly)
     }
 
-    @Test("A reversal within one drag cannot switch back")
-    func reversalWithinADragIsIgnored() {
+    @Test("Releasing past the threshold commits the switch")
+    func releasePastThresholdCommits() {
         let viewModel = makeViewModel(mode: .monthly)
 
         viewModel.handleDragChanged(translation: -120)
-        #expect(viewModel.mode == .weekly)
+        viewModel.handleDragEnded(translation: -120)
 
-        // Same gesture, finger swings the other way past the threshold.
-        viewModel.handleDragChanged(translation: 150)
         #expect(viewModel.mode == .weekly)
-
-        // A *new* gesture is free to switch back.
-        viewModel.handleDragEnded(translation: 150)
-        viewModel.handleDragChanged(translation: 120)
-        #expect(viewModel.mode == .monthly)
     }
 
-    @Test("Dragging the handle down expands again")
-    func handleDragExpands() {
+    @Test("Releasing short of the threshold springs back")
+    func releaseShortSpringsBack() {
+        let viewModel = makeViewModel(mode: .monthly)
+
+        viewModel.handleDragChanged(translation: -70)
+        #expect(abs(viewModel.progress - 0.7) < 0.000_001)
+
+        viewModel.handleDragEnded(translation: -70)
+
+        #expect(viewModel.mode == .monthly)
+        #expect(viewModel.progress == 0)
+    }
+
+    @Test("Dragging the handle down expands, and short of the threshold springs back")
+    func dragDownExpands() {
         let viewModel = makeViewModel(mode: .weekly)
 
-        viewModel.handleDragChanged(translation: 130)
+        viewModel.handleDragChanged(translation: 40)
+        #expect(abs(viewModel.progress - 0.6) < 0.000_001)
 
+        viewModel.handleDragEnded(translation: 40)
+        #expect(viewModel.mode == .weekly)
+        #expect(viewModel.progress == 1)
+
+        viewModel.handleDragChanged(translation: 130)
+        viewModel.handleDragEnded(translation: 130)
         #expect(viewModel.mode == .monthly)
     }
 
-    @Test("A custom threshold changes how far the handle has to travel")
+    @Test("Dragging the wrong way moves nothing and commits nothing")
+    func wrongWayDragIsInert() {
+        let viewModel = makeViewModel(mode: .monthly)
+
+        viewModel.handleDragChanged(translation: 200)
+        #expect(viewModel.progress == 0)
+
+        viewModel.handleDragEnded(translation: 200)
+        #expect(viewModel.mode == .monthly)
+    }
+
+    @Test("A drag that swings back before release is judged on where it ended")
+    func reversalIsJudgedOnRelease() {
+        let viewModel = makeViewModel(mode: .monthly)
+
+        // Well past the threshold…
+        viewModel.handleDragChanged(translation: -180)
+        #expect(viewModel.progress == 1)
+
+        // …then the user changes their mind and comes back before lifting.
+        viewModel.handleDragChanged(translation: -20)
+        viewModel.handleDragEnded(translation: -20)
+
+        #expect(viewModel.mode == .monthly)
+        #expect(viewModel.progress == 0)
+    }
+
+    @Test("Tracking maps against the measured collapsible height, not the threshold")
+    func trackingUsesMeasuredHeight() {
+        let viewModel = makeViewModel(mode: .monthly)
+        guard let page = viewModel.visibleMonthPage else {
+            Issue.record("no visible page")
+            return
+        }
+
+        // Six 50pt rows, 1pt apart: the grid can lose 5 rows plus their gaps.
+        let rows = Double(page.weeks.count)
+        viewModel.gridHeights[page.id] = rows * 50 + (rows - 1)
+        let collapsible = (rows - 1) * 50 + (rows - 1)
+
+        // Half the collapsible height dragged is half the calendar closed —
+        // which is a much longer drag than the 100pt commit threshold.
+        viewModel.handleDragChanged(translation: -collapsible / 2)
+        #expect(abs(viewModel.progress - 0.5) < 0.000_001)
+
+        viewModel.handleDragChanged(translation: -collapsible)
+        #expect(viewModel.progress == 1)
+    }
+
+    @Test("A short flick still commits, even though it barely moved the calendar")
+    func shortFlickCommits() {
+        let viewModel = makeViewModel(mode: .monthly)
+        guard let page = viewModel.visibleMonthPage else {
+            Issue.record("no visible page")
+            return
+        }
+
+        let rows = Double(page.weeks.count)
+        viewModel.gridHeights[page.id] = rows * 50 + (rows - 1)
+
+        // 110pt closes the calendar only partway…
+        viewModel.handleDragChanged(translation: -110)
+        #expect(viewModel.progress < 0.6)
+
+        // …but it clears the commit threshold, so the rest is animated.
+        viewModel.handleDragEnded(translation: -110)
+        #expect(viewModel.mode == .weekly)
+    }
+
+    @Test("A custom threshold changes how far the handle must travel to commit")
     func customThresholdIsHonoured() {
         let viewModel = makeViewModel(mode: .monthly)
         viewModel.collapseThreshold = 250
 
-        viewModel.handleDragChanged(translation: -140)
+        viewModel.handleDragEnded(translation: -140)
         #expect(viewModel.mode == .monthly)
 
-        viewModel.handleDragChanged(translation: -260)
+        viewModel.handleDragEnded(translation: -260)
         #expect(viewModel.mode == .weekly)
     }
 
@@ -574,5 +640,46 @@ struct AgendaScrollCorrectionTests {
 
         #expect(viewModel.scrollRequest == nil)
         #expect(viewModel.selection == Fixture.date(2030, 7, 24))
+    }
+}
+
+@Suite("Agenda pager freshness")
+@MainActor
+struct AgendaPagerFreshnessTests {
+
+    let calendar = Fixture.gregorian
+
+    /// Both pagers must be on the right page at all times, not just the visible
+    /// one. An interactive collapse reveals the month pager mid-gesture, before
+    /// any mode change could correct it.
+    @Test("The off-screen month pager keeps up while the calendar is in .weekly")
+    func hiddenMonthPagerStaysCurrent() {
+        let selection = Fixture.date(2030, 7, 10)
+        let viewModel = EZCalendarAgendaViewModel(calendar: calendar, mode: .weekly, selection: selection)
+        viewModel.rebuildPages(from: Fixture.months([(7, 2030), (8, 2030), (9, 2030)]))
+        viewModel.primePagers(for: selection)
+
+        #expect(viewModel.visibleMonthID == EZCalendarAgendaLogic.monthID(month: 7, year: 2030))
+
+        // The user scrolls the list into September while collapsed.
+        viewModel.selection = Fixture.date(2030, 9, 15)
+        viewModel.selectionChanged()
+
+        // Dragging the handle open now must not reveal July.
+        #expect(viewModel.visibleMonthID == EZCalendarAgendaLogic.monthID(month: 9, year: 2030))
+    }
+
+    @Test("The off-screen week pager keeps up while the calendar is in .monthly")
+    func hiddenWeekPagerStaysCurrent() {
+        let selection = Fixture.date(2030, 7, 10)
+        let viewModel = EZCalendarAgendaViewModel(calendar: calendar, mode: .monthly, selection: selection)
+        viewModel.rebuildPages(from: Fixture.months([(7, 2030), (8, 2030)]))
+        viewModel.primePagers(for: selection)
+
+        viewModel.selection = Fixture.date(2030, 8, 19)
+        viewModel.selectionChanged()
+
+        let page = viewModel.weekPages.first { $0.id == viewModel.visibleWeekID }
+        #expect(page?.days.contains { $0.date == Fixture.date(2030, 8, 19) } == true)
     }
 }

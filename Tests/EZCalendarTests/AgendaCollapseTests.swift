@@ -14,10 +14,82 @@ struct AgendaCollapseTests {
 
     let threshold: Double = 100
 
-    // MARK: - The handle drag decides by threshold, not by tracking
+    // MARK: - Tracking the finger
+
+    /// Roughly a six-row month of 50pt rows: what the grid can actually lose.
+    let travel: Double = 255
 
     @Test(
-        "Dragging the handle up out of .monthly switches only once past the threshold",
+        "Collapse progress follows the drag proportionally out of .monthly",
+        arguments: [
+            (translation: 0.0, progress: 0.0),
+            (translation: -63.75, progress: 0.25),
+            (translation: -127.5, progress: 0.5),
+            (translation: -255.0, progress: 1.0),
+            (translation: -600.0, progress: 1.0)
+        ]
+    )
+    func trackingFromMonthly(translation: Double, progress: Double) {
+        let result = EZCalendarAgendaLogic.progress(
+            forHandleTranslation: translation,
+            from: .monthly,
+            travel: travel
+        )
+
+        #expect(abs(result - progress) < 0.000_001)
+    }
+
+    @Test(
+        "Expand progress follows the drag proportionally out of .weekly",
+        arguments: [
+            (translation: 0.0, progress: 1.0),
+            (translation: 63.75, progress: 0.75),
+            (translation: 127.5, progress: 0.5),
+            (translation: 255.0, progress: 0.0),
+            (translation: 600.0, progress: 0.0)
+        ]
+    )
+    func trackingFromWeekly(translation: Double, progress: Double) {
+        let result = EZCalendarAgendaLogic.progress(
+            forHandleTranslation: translation,
+            from: .weekly,
+            travel: travel
+        )
+
+        #expect(abs(result - progress) < 0.000_001)
+    }
+
+    @Test("Dragging the wrong way holds at the mode's own resting value")
+    func wrongWayTrackingIsClamped() {
+        // A month cannot be pulled further open, nor a week further shut.
+        #expect(EZCalendarAgendaLogic.progress(forHandleTranslation: 300, from: .monthly, travel: travel) == 0)
+        #expect(EZCalendarAgendaLogic.progress(forHandleTranslation: -300, from: .weekly, travel: travel) == 1)
+    }
+
+    @Test("Tracking is 1:1 with the finger, in points")
+    func trackingIsOneToOne() {
+        // 40pt of drag closes 40pt of a 255pt collapse — the property that makes
+        // the calendar feel attached to the finger rather than merely animated.
+        let result = EZCalendarAgendaLogic.progress(
+            forHandleTranslation: -40,
+            from: .monthly,
+            travel: travel
+        )
+
+        #expect(abs(result * travel - 40) < 0.000_001)
+    }
+
+    @Test("Before the grid is measured, tracking holds rather than dividing by zero")
+    func unmeasuredTravelHoldsTheMode() {
+        #expect(EZCalendarAgendaLogic.progress(forHandleTranslation: -80, from: .monthly, travel: 0) == 0)
+        #expect(EZCalendarAgendaLogic.progress(forHandleTranslation: 80, from: .weekly, travel: -5) == 1)
+    }
+
+    // MARK: - Committing on release
+
+
+    @Test(
+        "Releasing a drag up out of .monthly commits only past the threshold",
         arguments: [
             (translation: 0.0, expected: EZCalendarAgendaMode.monthly),
             (translation: -40.0, expected: .monthly),
@@ -37,7 +109,7 @@ struct AgendaCollapseTests {
     }
 
     @Test(
-        "Dragging the handle down out of .weekly switches only once past the threshold",
+        "Releasing a drag down out of .weekly commits only past the threshold",
         arguments: [
             (translation: 0.0, expected: EZCalendarAgendaMode.weekly),
             (translation: 55.0, expected: .weekly),
@@ -56,7 +128,7 @@ struct AgendaCollapseTests {
         #expect(result == expected)
     }
 
-    @Test("Dragging the handle the wrong way never switches, however far it goes")
+    @Test("Releasing a wrong-way drag never commits, however far it went")
     func wrongWayDragsAreInert() {
         #expect(EZCalendarAgendaLogic.mode(forHandleTranslation: 400, from: .monthly, threshold: threshold) == .monthly)
         #expect(EZCalendarAgendaLogic.mode(forHandleTranslation: -400, from: .weekly, threshold: threshold) == .weekly)

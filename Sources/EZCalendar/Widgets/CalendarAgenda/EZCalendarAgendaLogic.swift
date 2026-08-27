@@ -42,7 +42,8 @@ struct AgendaEventIndex<Event> {
  | Pages | `monthPages`, `weekPages` — the horizontal page sets |
  | Selection rules | `selection(forMonthPage:)`, `selection(forWeekPage:)` |
  | Two-way sync | `topMostSectionID`, `index(of:)`, `eventIndex` |
- | Collapse geometry | `mode(forHandleTranslation:)`, `gridHeight`, `gridOffset`, `rowOpacity` |
+ | Collapse gesture | `progress(forHandleTranslation:)` while dragging, `mode(forHandleTranslation:)` on release |
+ | Collapse geometry | `gridHeight`, `gridOffset`, `rowOpacity`, `rowHeight` |
 
  ## ⚠️ Two deliberate deviations from `Date+.swift`
 
@@ -348,11 +349,53 @@ enum EZCalendarAgendaLogic {
     //
     // `progress` is the single number every transition animation reads:
     //   0 = fully expanded (.monthly), 1 = fully collapsed (.weekly).
-    // It is only ever set to one end or the other, and animated between them, so
-    // a handle drag and a programmatic mode change share one code path.
+    // A live handle drag writes it continuously; a committed or abandoned drag,
+    // and a programmatic mode change, animate it to one end or the other.
 
     static func clamp(_ value: Double, lower: Double = 0, upper: Double = 1) -> Double {
         min(max(value, lower), upper)
+    }
+
+    /// Collapse progress while the grab handle is under the finger.
+    ///
+    /// `translation` is `DragGesture.Value.translation.height`, measured from
+    /// where the finger went down: negative upward.
+    ///
+    /// `travel` is how far the finger has to move to close the calendar
+    /// completely — the height the grid actually loses, month minus one week
+    /// row. Mapping against that, rather than against the commit threshold, is
+    /// what makes the calendar stick to the finger: move the handle 40pt and the
+    /// grid closes by 40pt, because 40pt is exactly what 40pt of travel is worth.
+    ///
+    /// ```
+    ///   .monthly, travel 260pt      .weekly, travel 260pt
+    ///   ────────────────────────    ────────────────────────
+    ///     0pt →  0.00                 0pt →  1.00
+    ///   -65pt →  0.25               +65pt →  0.75
+    ///  -130pt →  0.50              +130pt →  0.50
+    ///  -260pt →  1.00              +260pt →  0.00
+    ///  -400pt →  1.00 (clamped)    -400pt →  1.00 (wrong way)
+    /// ```
+    ///
+    /// Dragging the wrong way clamps to the mode's own resting value, so the
+    /// calendar cannot be pulled open past a month or shut past a week.
+    ///
+    /// This only describes what the calendar *looks like* mid-drag. Whether the
+    /// gesture actually changes anything is decided on release, separately, by
+    /// `mode(forHandleTranslation:from:threshold:)`.
+    static func progress(
+        forHandleTranslation translation: Double,
+        from mode: EZCalendarAgendaMode,
+        travel: Double
+    ) -> Double {
+        guard travel > 0 else { return mode.progress }
+
+        switch mode {
+        case .monthly:
+            return clamp(-translation / travel)
+        case .weekly:
+            return 1 - clamp(translation / travel)
+        }
     }
 
     /// Whether a drag on the grab handle has gone far enough to switch modes.
@@ -366,12 +409,15 @@ enum EZCalendarAgendaLogic {
     ///   anything else                       →  unchanged
     /// ```
     ///
-    /// The calendar deliberately does **not** track the finger on the way there.
-    /// Interpolating the collapse against a live drag looks stuttery — the grid
-    /// is re-laying out every frame — and it leaves the calendar sitting at some
-    /// arbitrary half-open height if the gesture is abandoned. Waiting for one
-    /// clean threshold crossing and then animating the whole way reads as a
-    /// decisive snap instead, and there is no in-between state to recover from.
+    /// This is the **commit** decision, taken once, when the finger lifts. The
+    /// calendar has been tracking the drag the whole way there via
+    /// `progress(forHandleTranslation:from:travel:)`; this says whether that
+    /// preview becomes real or is animated back where it came from.
+    ///
+    /// Note the two distances are independent on purpose. Tracking maps against
+    /// the full collapsible height, so the calendar moves with the finger;
+    /// committing needs only `threshold`, so a short decisive flick is enough to
+    /// switch without having to drag the calendar shut by hand.
     static func mode(
         forHandleTranslation translation: Double,
         from mode: EZCalendarAgendaMode,

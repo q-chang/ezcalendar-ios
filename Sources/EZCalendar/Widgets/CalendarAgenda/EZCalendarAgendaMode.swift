@@ -15,7 +15,7 @@ import Foundation
 
  | Driver | What happens |
  | --- | --- |
- | The user drags the grab handle | The mode flips once the drag passes the snap threshold. |
+ | The user drags the grab handle | The calendar follows the finger; the mode commits on release, if the drag passed the threshold. |
  | The user taps a day while `.monthly` | The mode auto-snaps to `.weekly`. |
  | The caller assigns the binding | The calendar animates to the new mode. |
 

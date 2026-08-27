@@ -125,9 +125,17 @@ import SwiftUI
  ### 3. Drag the grab handle → the calendar collapses and expands
 
  Drag the handle up out of `.monthly` to collapse, down out of `.weekly` to
- expand. It switches the moment the drag passes `collapseThreshold` — mid-gesture,
- without waiting for the finger to lift — and animates the whole way, rather than
- interpolating against the drag. Non-selected weeks fade as the grid closes.
+ expand. The calendar tracks the finger point-for-point on the way — non-selected
+ weeks fading as the grid closes over them — and nothing is committed until the
+ finger lifts:
+
+ | On release, dragged | Result |
+ | --- | --- |
+ | at least `collapseThreshold` the right way | animates the rest of the way and switches |
+ | less than that, or the wrong way | animates back to where it started |
+
+ So a short flick commits even though it only moved the calendar a little, and a
+ long exploratory drag can still be abandoned.
 
  **The handle is the only surface that does this.** Scrolling the event list only
  ever scrolls the list, in either direction, over-scroll included.
@@ -406,8 +414,12 @@ public struct EZCalendarAgendaView<
         return view
     }
 
-    /// How far the grab handle must be dragged to switch modes. A drag that
-    /// stops short of this changes nothing. Default `100`.
+    /// How far the grab handle must be dragged, on release, to switch modes.
+    /// A drag that stops short of this springs back. Default `100`.
+    ///
+    /// This is only the commit decision. While the finger is down the calendar
+    /// tracks it against the grid's own collapsible height, so the two distances
+    /// are deliberately independent.
     public func collapseThreshold(_ points: CGFloat) -> Self {
         guard points > 0 else { return self }
 

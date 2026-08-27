@@ -16,6 +16,10 @@ import SwiftUI
 /// `.monthly` and `.weekly` only through the grab handle above the list (or the
 /// caller's `mode` binding, or a day tap).
 ///
+/// The handle's drag tracks the finger and commits on release; because it is a
+/// gesture on its own view rather than one layered over this `ScrollView`, the
+/// two never compete.
+///
 /// An earlier version drove the collapse from this list's scroll offset, on the
 /// theory that it would feel native. It did not: reading down through a busy
 /// day's events collapsed the calendar out from under you, and an over-scroll at
@@ -58,11 +62,21 @@ struct AgendaListView<Event: Identifiable, ListHeaderView: View, EventItemView: 
     ///
     /// `minimumDistance: 1` keeps a tap on the handle from registering as a
     /// zero-length drag.
+    ///
+    /// ⚠️ **`coordinateSpace: .global` is load-bearing.** The handle sits at the
+    /// bottom edge of the calendar, so collapsing the calendar moves the handle
+    /// up — under the finger that is doing the collapsing. A `DragGesture`
+    /// reports translation in the coordinate space of the view it is attached to,
+    /// so in the default (local) space the handle's own movement is subtracted
+    /// from the drag: the gesture damps itself, roughly halving. Measured that
+    /// way a 150pt drag reports about 75pt, and the commit threshold silently
+    /// needs twice the distance the caller asked for. `.global` does not move
+    /// with the calendar, so a point of finger travel is a point of translation.
     private var grabHandle: some View {
         handleViewContent()
             .contentShape(Rectangle())
             .gesture(
-                DragGesture(minimumDistance: 1)
+                DragGesture(minimumDistance: 1, coordinateSpace: .global)
                     .onChanged { value in
                         viewModel.handleDragChanged(translation: value.translation.height)
                     }
