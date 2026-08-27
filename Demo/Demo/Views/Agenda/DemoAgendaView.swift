@@ -20,9 +20,9 @@ import EZCalendar
  * **Sticky header** — the date, plus "No jobs scheduled" on an empty day.
  * **Title bar** — `‹ July 2026 ›`, driven by the component's own paging closures.
 
- The strip under the title bar reports the last few state changes, so the
- two-way sync can be verified on screen: tap a date and watch the list scroll,
- scroll the list and watch the selection follow.
+ The calendar switches between month and week only via the grab handle, the
+ Collapse/Expand button, or tapping a day. Scrolling the event list just scrolls
+ it.
  */
 struct DemoAgendaView: View {
 
@@ -51,12 +51,6 @@ struct DemoAgendaView: View {
         .background(Color(.systemGroupedBackground))
         .navigationTitle("Agenda")
         .navigationBarTitleDisplayMode(.inline)
-        .onChange(of: viewModel.selectedDate) { _, date in
-            viewModel.note("selected \(viewModel.headerTitle(for: date))")
-        }
-        .onChange(of: viewModel.mode) { _, mode in
-            viewModel.note("mode → .\(mode.rawValue)")
-        }
     }
 
     // MARK: - Calendar slots
@@ -100,18 +94,6 @@ struct DemoAgendaView: View {
                     .font(.caption.monospaced())
                     .foregroundStyle(.secondary)
             }
-
-            // A tiny on-screen log, so the sync can be checked without Xcode.
-            VStack(alignment: .leading, spacing: 1) {
-                ForEach(viewModel.log, id: \.self) { line in
-                    Text(line)
-                        .font(.caption2.monospaced())
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .frame(height: 44, alignment: .top)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
@@ -164,7 +146,7 @@ struct DemoAgendaView: View {
         Capsule()
             .fill(Color.secondary.opacity(0.4))
             .frame(width: 40, height: 5)
-            .padding(.vertical, 8)
+            .padding(.vertical, 14)
             .frame(maxWidth: .infinity)
             .background(Color(.systemGroupedBackground))
     }

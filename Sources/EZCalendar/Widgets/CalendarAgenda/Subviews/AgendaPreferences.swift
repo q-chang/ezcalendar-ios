@@ -82,6 +82,7 @@ extension View {
     // whatever is built on it without failing.
     //
     // The section headers above are the one measurement that stays live, because
-    // they only exist while they are near the viewport. The collapse is derived
-    // from them — see `EZCalendarAgendaViewModel.trackListTravel(_:)`.
+    // they only exist while they are near the viewport. If you ever need a scroll
+    // measurement here, derive it from those — and verify it fires more than once
+    // before building anything on it.
 }

@@ -13,7 +13,7 @@ import SwiftUI
 
  `EZCalendarAgendaView` owns three things the caller can see (`mode`,
  `selectedDate`, `calendarMonths`) and about a dozen it cannot: page sets,
- measured heights, scroll offsets, collapse progress, and the two re-entrancy
+ measured heights, collapse progress, and the two re-entrancy
  latches that keep the calendar and the list from shouting at each other.
 
  The public three stay as `@Binding`s on the view. Everything else lives here, so
@@ -22,9 +22,11 @@ import SwiftUI
  ## The one number that drives every animation
 
  `progress` is `0` when the calendar is a full month and `1` when it is a single
- week. A list scroll, a handle drag, and a programmatic `mode` change all funnel
- into it, which is why the view has exactly one transition code path instead of
- three.
+ week. It is only ever set to one end or the other and animated between them, so
+ a handle drag and a programmatic `mode` change share one transition path.
+
+ Nothing tracks the finger continuously, and the agenda list cannot change the
+ mode at all — scrolling it only scrolls it.
 
  ## The two latches
 
@@ -48,7 +50,7 @@ final class EZCalendarAgendaViewModel: ObservableObject {
 
     let calendar: Calendar
 
-    /// Points of drag or scroll that constitute a full collapse or expand.
+    /// How far the grab handle must be dragged to switch modes.
     /// Caller-tunable through `.collapseThreshold(_:)`.
     var collapseThreshold: Double = 100
 
@@ -105,10 +107,8 @@ final class EZCalendarAgendaViewModel: ObservableObject {
 
     private var isDrivingList = false
     private var isDrivingPager = false
-    private var isHandleDragging = false
     private var listSyncRelease: Task<Void, Never>?
     private var pagerSyncRelease: Task<Void, Never>?
-    private var collapseSettle: Task<Void, Never>?
 
     /// The section id an in-flight scroll is heading for. The list latch is
     /// released the moment this one reports itself pinned — see
@@ -122,14 +122,9 @@ final class EZCalendarAgendaViewModel: ObservableObject {
 
     /// Scroll offset the list last reported, and the offset it was resting at
     /// when the current mode settled. The collapse is driven by the difference.
-    /// Header positions from the previous frame, and how far the list has
-    /// travelled since it last came to rest. See `trackListTravel(_:)`.
-    private var previousHeaderOffsets: [String: Double] = [:]
-    private var listTravel: Double = 0
-
-    /// A header parked at the top edge is the pinned one and never moves, so it
-    /// says nothing about scrolling. This is how close to zero counts as parked.
-    private let pinnedSlack: Double = 1
+    /// `true` once the current handle drag has already switched modes, so the
+    /// rest of that drag is ignored.
+    private var hasSnappedThisDrag = false
 
     /// Re-issues left for the current scroll. See `correctScroll(towards:)`.
     private var scrollCorrectionsRemaining = 0
@@ -313,8 +308,6 @@ final class EZCalendarAgendaViewModel: ObservableObject {
 
         syncPager(to: selection, mode: mode)
 
-        resetListTravel()
-
         let target = mode.progress
 
         // A gesture that ran all the way to the end has already put `progress`
@@ -339,104 +332,42 @@ final class EZCalendarAgendaViewModel: ObservableObject {
         }
     }
 
-    // MARK: - Collapse gestures
-
-    /// The agenda list scrolled. This is the primary collapse driver, and the
-    /// reason the gesture never fights the list: the collapse only consumes
-    /// movement the list itself cannot use.
-    func listOffsetChanged(_ offset: Double) {
-        // An explicit handle drag outranks the list; ignore inertial noise while
-        // the user's finger owns the transition.
-        guard !isHandleDragging else { return }
-
-        let current = mode
-        let newProgress = EZCalendarAgendaLogic.progress(
-            forListOffset: offset,
-            mode: current,
-            threshold: collapseThreshold
-        )
-
-        progress = newProgress
-
-        let resolved = EZCalendarAgendaLogic.resolvedMode(progress: newProgress, from: current)
-        if resolved != current {
-            mode = resolved
-        } else {
-            scheduleCollapseSettle()
-        }
-    }
-
-    /// A scroll-driven collapse has no "gesture ended" callback the way a
-    /// `DragGesture` does — iOS 17 offers no scroll-phase signal — so a drag that
-    /// stops half way would leave the calendar frozen mid-collapse forever.
-    ///
-    /// This settles it a beat after the list goes quiet. Each new movement
-    /// cancels the pending settle, so it only fires once the scroll has genuinely
-    /// stopped, momentum included.
-    private func scheduleCollapseSettle() {
-        collapseSettle?.cancel()
-
-        // Already resting at one end; nothing to settle.
-        guard progress > 0, progress < 1 else { return }
-
-        collapseSettle = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 140_000_000)
-            guard !Task.isCancelled else { return }
-            self?.settleCollapse()
-        }
-    }
-
-    /// Resolves a half-finished collapse: past the threshold it would already
-    /// have flipped the mode, so anything still in between springs back to where
-    /// the gesture started.
-    func settleCollapse() {
-        guard progress > 0, progress < 1 else { return }
-
-        let resolved = EZCalendarAgendaLogic.resolvedMode(progress: progress, from: mode)
-
-        if resolved != mode {
-            mode = resolved
-        } else {
-            withAnimation(collapseAnimation) {
-                progress = mode.progress
-            }
-            resetListTravel()
-        }
-    }
+    // MARK: - Collapse gesture
+    //
+    // The grab handle is the *only* thing that switches modes by gesture.
+    //
+    // The agenda list used to drive it too, off its scroll offset. That is gone
+    // on purpose: it meant an ordinary scroll through the day's events could
+    // collapse the calendar out from under the reader, and an over-scroll at the
+    // top could expand it, neither of which the user asked for. Scrolling the
+    // list now only ever scrolls the list.
 
     /// Live drag on the grab handle.
+    ///
+    /// Snaps the moment the drag passes the threshold, mid-gesture, rather than
+    /// interpolating the calendar against the finger — see
+    /// `EZCalendarAgendaLogic.mode(forHandleTranslation:from:threshold:)` for why.
+    /// Once it has snapped it ignores the rest of the drag, so one long sweep
+    /// cannot flip the mode back and forth under a still-moving finger.
     func handleDragChanged(translation: Double) {
-        isHandleDragging = true
+        guard !hasSnappedThisDrag else { return }
 
-        progress = EZCalendarAgendaLogic.progress(
+        let resolved = EZCalendarAgendaLogic.mode(
             forHandleTranslation: translation,
-            mode: mode,
+            from: mode,
             threshold: collapseThreshold
         )
+
+        guard resolved != mode else { return }
+
+        hasSnappedThisDrag = true
+        mode = resolved
     }
 
-    /// Released handle drag: past the threshold it snaps to the other mode,
-    /// short of it it springs back to where it started.
+    /// Released handle drag. There is nothing to settle — the snap already
+    /// happened, or the drag never earned one — so this only re-arms the gesture.
     func handleDragEnded(translation: Double) {
-        isHandleDragging = false
-
-        let current = mode
-        let finalProgress = EZCalendarAgendaLogic.progress(
-            forHandleTranslation: translation,
-            mode: current,
-            threshold: collapseThreshold
-        )
-
-        let resolved = EZCalendarAgendaLogic.resolvedMode(progress: finalProgress, from: current)
-
-        if resolved != current {
-            // `modeChanged()` animates progress to its rest value.
-            mode = resolved
-        } else {
-            withAnimation(collapseAnimation) {
-                progress = current.progress
-            }
-        }
+        hasSnappedThisDrag = false
     }
 
     // MARK: - Horizontal paging
@@ -525,8 +456,6 @@ final class EZCalendarAgendaViewModel: ObservableObject {
         let topID = EZCalendarAgendaLogic.topMostSectionID(headerOffsets: offsets)
 
         // Do not read the list back while we are the ones moving it.
-        // While we are animating the list ourselves, its movement is not a
-        // gesture and must not drive the collapse.
         if isDrivingList {
             // Release on *arrival* rather than on a timer. A timer has to guess
             // how long the scroll takes, and guessing short is catastrophic: the
@@ -536,24 +465,12 @@ final class EZCalendarAgendaViewModel: ObservableObject {
             return
         }
 
-        trackListTravel(offsets)
-
-        // Do not re-anchor mid-gesture. A short section — an empty day is barely
-        // taller than its own header — would otherwise hand the anchor to the
-        // next day before the collapse could finish, and the gesture would stall
-        // half way with nothing to measure against.
-        guard progress <= 0 || progress >= 1 else { return }
-
         guard let topID,
               let date = sectionDates[topID],
               !calendar.isDate(date, inSameDayAs: selection)
         else { return }
 
         selection = date
-
-        // The list has settled on a new day, so that is the new "at rest"
-        // position the next collapse gesture is measured from.
-        resetListTravel()
     }
 
     /// Turns the list's scroll into collapse progress.
@@ -581,55 +498,6 @@ final class EZCalendarAgendaViewModel: ObservableObject {
     /// When the anchor scrolls out of view entirely there is nothing to report,
     /// so progress simply holds — which is the right behaviour: deep in the list
     /// the calendar stays collapsed.
-    /// Turns section-header movement into collapse progress.
-    ///
-    /// The collapse needs one number: how far the list has been dragged since it
-    /// came to rest. There is no way to read that from the scroll view directly —
-    /// every absolute probe goes silent once the content scrolls away from it
-    /// (see the note in `AgendaPreferences.swift`) — so it is *accumulated* here,
-    /// frame by frame, from the only thing that keeps reporting: the headers.
-    ///
-    /// Each frame, any header that appeared in the previous frame too has moved
-    /// by exactly the distance the content moved. Taking the median across them
-    /// rejects the odd header that is appearing or being recycled at the edges.
-    ///
-    /// Headers parked at the top edge are excluded: that is the *pinned* one,
-    /// which by definition holds at zero however far the list scrolls, and would
-    /// otherwise drag the median to nothing.
-    ///
-    /// Sign follows the scroll-offset convention used by the collapse logic:
-    /// content moving up (a drag up, `minY` decreasing) is positive travel.
-    func trackListTravel(_ offsets: [AgendaHeaderOffset]) {
-        var deltas: [Double] = []
-
-        for offset in offsets where abs(offset.minY) > pinnedSlack {
-            guard let previous = previousHeaderOffsets[offset.id] else { continue }
-            deltas.append(offset.minY - previous)
-        }
-
-        previousHeaderOffsets = Dictionary(
-            offsets.map { ($0.id, $0.minY) },
-            uniquingKeysWith: { first, _ in first }
-        )
-
-        guard !deltas.isEmpty else { return }
-
-        deltas.sort()
-        let median = deltas[deltas.count / 2]
-        guard median != 0 else { return }
-
-        listTravel -= median
-        listOffsetChanged(listTravel)
-    }
-
-    /// Re-zeroes the gesture. Called wherever the list has settled somewhere new,
-    /// so the next drag is measured from where the user can actually see it
-    /// resting rather than from some earlier position.
-    private func resetListTravel() {
-        listTravel = 0
-        previousHeaderOffsets = [:]
-    }
-
     /// Asks the list to bring `date`'s sticky header to the top.
     private func requestListScroll(to date: Date) {
         let id = EZCalendarAgendaLogic.dayID(for: date, calendar: calendar)
@@ -699,9 +567,6 @@ final class EZCalendarAgendaViewModel: ObservableObject {
         pendingScrollTarget = nil
         scrollCorrectionsRemaining = 0
         isDrivingList = false
-
-        // Wherever the list has just settled is the new zero for the gesture.
-        resetListTravel()
     }
 
     /// Holds the pager latch across a programmatic move, so the page we just

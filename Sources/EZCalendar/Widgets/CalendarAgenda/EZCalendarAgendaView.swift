@@ -122,12 +122,15 @@ import SwiftUI
  Whichever sticky header is pinned at the top is the day the calendar selects,
  paging itself to a new month or week if the list has scrolled that far.
 
- ### 3. Drag → the calendar collapses and expands
+ ### 3. Drag the grab handle → the calendar collapses and expands
 
- Driven by the list's own scroll offset, so the gesture never competes with the
- list. Scrolling up out of `.monthly` collapses; over-scrolling past the top of
- `.weekly` expands. Non-selected weeks fade as the grid closes over them. The
- grab handle offers an explicit drag for the same thing.
+ Drag the handle up out of `.monthly` to collapse, down out of `.weekly` to
+ expand. It switches the moment the drag passes `collapseThreshold` — mid-gesture,
+ without waiting for the finger to lift — and animates the whole way, rather than
+ interpolating against the drag. Non-selected weeks fade as the grid closes.
+
+ **The handle is the only surface that does this.** Scrolling the event list only
+ ever scrolls the list, in either direction, over-scroll included.
 
  ### 4. Swipe the calendar → the page and the selection change together
 
@@ -403,8 +406,8 @@ public struct EZCalendarAgendaView<
         return view
     }
 
-    /// Points of drag or scroll that make a full collapse or expand. A gesture
-    /// that stops short of this springs back. Default `100`.
+    /// How far the grab handle must be dragged to switch modes. A drag that
+    /// stops short of this changes nothing. Default `100`.
     public func collapseThreshold(_ points: CGFloat) -> Self {
         guard points > 0 else { return self }
 

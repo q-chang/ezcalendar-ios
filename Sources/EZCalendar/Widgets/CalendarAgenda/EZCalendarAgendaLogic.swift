@@ -42,7 +42,7 @@ struct AgendaEventIndex<Event> {
  | Pages | `monthPages`, `weekPages` — the horizontal page sets |
  | Selection rules | `selection(forMonthPage:)`, `selection(forWeekPage:)` |
  | Two-way sync | `topMostSectionID`, `index(of:)`, `eventIndex` |
- | Collapse geometry | `progress(...)`, `resolvedMode`, `gridHeight`, `gridOffset`, `rowOpacity` |
+ | Collapse geometry | `mode(forHandleTranslation:)`, `gridHeight`, `gridOffset`, `rowOpacity` |
 
  ## ⚠️ Two deliberate deviations from `Date+.swift`
 
@@ -348,64 +348,42 @@ enum EZCalendarAgendaLogic {
     //
     // `progress` is the single number every transition animation reads:
     //   0 = fully expanded (.monthly), 1 = fully collapsed (.weekly).
-    // Both drag sources normalise into it, so the view has one code path for an
-    // interactive drag, an inertial scroll, and a programmatic mode change.
+    // It is only ever set to one end or the other, and animated between them, so
+    // a handle drag and a programmatic mode change share one code path.
 
     static func clamp(_ value: Double, lower: Double = 0, upper: Double = 1) -> Double {
         min(max(value, lower), upper)
     }
 
-    /// Collapse progress driven by the agenda list's own scroll offset.
+    /// Whether a drag on the grab handle has gone far enough to switch modes.
     ///
-    /// `offset` is how far the list content has travelled up past its top:
-    /// positive once scrolled into content, negative while rubber-banding above
-    /// the first section.
+    /// `translation` is `DragGesture.Value.translation.height`, measured from
+    /// where the finger went down: negative upward.
     ///
-    /// * `.monthly` — scrolling the list up (offset climbing from 0) collapses
-    ///   the calendar. One threshold's worth of scroll is a full collapse.
-    /// * `.weekly` — the list is free to scroll normally; only an over-scroll
-    ///   *past the top* (a negative offset, which the list can only produce when
-    ///   it is already at the top) expands the calendar again.
+    /// ```
+    ///   .monthly  +  drag up   ≥ threshold  →  .weekly
+    ///   .weekly   +  drag down ≥ threshold  →  .monthly
+    ///   anything else                       →  unchanged
+    /// ```
     ///
-    /// This is why the collapse never fights the list: the same finger movement
-    /// that would scroll the list is what drives the collapse, and only when the
-    /// list has nowhere left to scroll.
-    static func progress(forListOffset offset: Double, mode: EZCalendarAgendaMode, threshold: Double) -> Double {
-        guard threshold > 0 else { return mode.progress }
+    /// The calendar deliberately does **not** track the finger on the way there.
+    /// Interpolating the collapse against a live drag looks stuttery — the grid
+    /// is re-laying out every frame — and it leaves the calendar sitting at some
+    /// arbitrary half-open height if the gesture is abandoned. Waiting for one
+    /// clean threshold crossing and then animating the whole way reads as a
+    /// decisive snap instead, and there is no in-between state to recover from.
+    static func mode(
+        forHandleTranslation translation: Double,
+        from mode: EZCalendarAgendaMode,
+        threshold: Double
+    ) -> EZCalendarAgendaMode {
+        guard threshold > 0 else { return mode }
 
         switch mode {
         case .monthly:
-            return clamp(offset / threshold)
+            return translation <= -threshold ? .weekly : .monthly
         case .weekly:
-            return offset >= 0 ? 1 : 1 - clamp(-offset / threshold)
-        }
-    }
-
-    /// Collapse progress driven by an explicit drag on the grab handle.
-    ///
-    /// `translation` is `DragGesture.Value.translation.height`: negative upward.
-    /// Dragging up out of `.monthly` collapses; dragging down out of `.weekly`
-    /// expands. Dragging the "wrong" way clamps and does nothing.
-    static func progress(forHandleTranslation translation: Double, mode: EZCalendarAgendaMode, threshold: Double) -> Double {
-        guard threshold > 0 else { return mode.progress }
-
-        switch mode {
-        case .monthly:
-            return clamp(-translation / threshold)
-        case .weekly:
-            return 1 - clamp(translation / threshold)
-        }
-    }
-
-    /// Where a released drag settles.
-    ///
-    /// Because both `progress` functions normalise by the threshold, "the drag
-    /// exceeded the threshold" is exactly "progress reached the far end". Any
-    /// shorter drag springs back to the mode it started in.
-    static func resolvedMode(progress: Double, from mode: EZCalendarAgendaMode) -> EZCalendarAgendaMode {
-        switch mode {
-        case .monthly: return progress >= 1 ? .weekly : .monthly
-        case .weekly: return progress <= 0 ? .monthly : .weekly
+            return translation >= threshold ? .monthly : .weekly
         }
     }
 

@@ -104,98 +104,87 @@ struct AgendaViewModelTests {
         #expect(viewModel.scrollRequest?.animated == false)
     }
 
-    // MARK: - Collapsing by scrolling the list
-
-    @Test("Scrolling a .monthly list part way collapses part way, without changing mode")
-    func partialScrollDoesNotChangeMode() {
-        let viewModel = makeViewModel(mode: .monthly)
-
-        viewModel.listOffsetChanged(40)
-
-        #expect(viewModel.progress == 0.4)
-        #expect(viewModel.mode == .monthly)
-    }
-
-    @Test("Scrolling a .monthly list past the threshold flips it to .weekly")
-    func fullScrollCollapses() {
-        let viewModel = makeViewModel(mode: .monthly)
-
-        viewModel.listOffsetChanged(140)
-
-        #expect(viewModel.progress == 1)
-        #expect(viewModel.mode == .weekly)
-    }
-
-    @Test("Once collapsed, scrolling deeper into the list leaves the calendar alone")
-    func scrollingWhileCollapsedIsInert() {
-        let viewModel = makeViewModel(mode: .monthly)
-
-        viewModel.listOffsetChanged(140)
-        viewModel.listOffsetChanged(900)
-        viewModel.listOffsetChanged(300)
-
-        #expect(viewModel.mode == .weekly)
-        #expect(viewModel.progress == 1)
-    }
-
-    @Test("Over-scrolling the top of a .weekly list expands the calendar again")
-    func overscrollExpands() {
-        let viewModel = makeViewModel(mode: .weekly)
-
-        viewModel.listOffsetChanged(-40)
-        #expect(abs(viewModel.progress - 0.6) < 0.000_001)
-        #expect(viewModel.mode == .weekly)
-
-        viewModel.listOffsetChanged(-120)
-        #expect(viewModel.progress == 0)
-        #expect(viewModel.mode == .monthly)
-    }
-
-    @Test("A custom threshold changes how far the list has to travel")
-    func customThresholdIsHonoured() {
-        let viewModel = makeViewModel(mode: .monthly)
-        viewModel.collapseThreshold = 250
-
-        viewModel.listOffsetChanged(140)
-
-        #expect(viewModel.mode == .monthly)
-        #expect(abs(viewModel.progress - 0.56) < 0.000_001)
-    }
-
     // MARK: - Collapsing by dragging the handle
 
-    @Test("A handle drag past the threshold snaps to the other mode")
-    func handleDragSnaps() {
+    @Test("A handle drag past the threshold snaps mid-gesture, without waiting for release")
+    func handleDragSnapsMidGesture() {
         let viewModel = makeViewModel(mode: .monthly)
 
         viewModel.handleDragChanged(translation: -60)
-        #expect(abs(viewModel.progress - 0.6) < 0.000_001)
         #expect(viewModel.mode == .monthly)
 
-        viewModel.handleDragEnded(translation: -130)
+        // The switch lands on the frame the threshold is crossed — the user does
+        // not have to lift their finger to find out whether it took.
+        viewModel.handleDragChanged(translation: -110)
         #expect(viewModel.mode == .weekly)
     }
 
-    @Test("A handle drag that stops short springs back")
-    func handleDragSpringsBack() {
+    @Test("A handle drag that stops short leaves the calendar exactly as it was")
+    func shortHandleDragDoesNothing() {
         let viewModel = makeViewModel(mode: .monthly)
 
         viewModel.handleDragChanged(translation: -70)
         viewModel.handleDragEnded(translation: -70)
 
         #expect(viewModel.mode == .monthly)
+        // Nothing to spring back from: the calendar never left its resting state.
         #expect(viewModel.progress == 0)
     }
 
-    @Test("While the handle is held, the list's own scrolling cannot fight it")
-    func handleDragOutranksTheList() {
+    @Test("One long sweep switches once, not back and forth")
+    func oneDragSwitchesOnce() {
         let viewModel = makeViewModel(mode: .monthly)
 
-        viewModel.handleDragChanged(translation: -50)
-        viewModel.listOffsetChanged(900)
+        // A continuing drag keeps reporting a growing translation. Each frame
+        // past the threshold must not re-trigger the switch.
+        for distance in stride(from: -110.0, through: -400.0, by: -30.0) {
+            viewModel.handleDragChanged(translation: distance)
+        }
 
-        #expect(abs(viewModel.progress - 0.5) < 0.000_001)
+        #expect(viewModel.mode == .weekly)
+
+        // `progress` is animated by `modeChanged()`, which the view drives off
+        // `onChange(of: viewModel.mode)`; there is no view here.
+        viewModel.modeChanged()
+        #expect(viewModel.progress == 1)
+    }
+
+    @Test("A reversal within one drag cannot switch back")
+    func reversalWithinADragIsIgnored() {
+        let viewModel = makeViewModel(mode: .monthly)
+
+        viewModel.handleDragChanged(translation: -120)
+        #expect(viewModel.mode == .weekly)
+
+        // Same gesture, finger swings the other way past the threshold.
+        viewModel.handleDragChanged(translation: 150)
+        #expect(viewModel.mode == .weekly)
+
+        // A *new* gesture is free to switch back.
+        viewModel.handleDragEnded(translation: 150)
+        viewModel.handleDragChanged(translation: 120)
         #expect(viewModel.mode == .monthly)
+    }
+
+    @Test("Dragging the handle down expands again")
+    func handleDragExpands() {
+        let viewModel = makeViewModel(mode: .weekly)
+
+        viewModel.handleDragChanged(translation: 130)
+
+        #expect(viewModel.mode == .monthly)
+    }
+
+    @Test("A custom threshold changes how far the handle has to travel")
+    func customThresholdIsHonoured() {
+        let viewModel = makeViewModel(mode: .monthly)
+        viewModel.collapseThreshold = 250
+
+        viewModel.handleDragChanged(translation: -140)
+        #expect(viewModel.mode == .monthly)
+
+        viewModel.handleDragChanged(translation: -260)
+        #expect(viewModel.mode == .weekly)
     }
 
     // MARK: - Horizontal paging
@@ -585,232 +574,5 @@ struct AgendaScrollCorrectionTests {
 
         #expect(viewModel.scrollRequest == nil)
         #expect(viewModel.selection == Fixture.date(2030, 7, 24))
-    }
-}
-
-/// The collapse is driven by list travel accumulated from section-header
-/// movement, because no absolute scroll probe survives (see AgendaPreferences).
-@Suite("Agenda collapse travel")
-@MainActor
-struct AgendaCollapseTravelTests {
-
-    let calendar = Fixture.gregorian
-
-    func makeViewModel(mode: EZCalendarAgendaMode = .monthly) -> EZCalendarAgendaViewModel {
-        let selection = Fixture.date(2030, 7, 10)
-        let viewModel = EZCalendarAgendaViewModel(calendar: calendar, mode: mode, selection: selection)
-        viewModel.rebuildPages(from: Fixture.months([(7, 2030)]))
-        viewModel.primePagers(for: selection)
-
-        var dates: [String: Date] = [:]
-        for day in 1...31 {
-            let date = Fixture.date(2030, 7, day)
-            dates[EZCalendarAgendaLogic.dayID(for: date, calendar: calendar)] = date
-        }
-        viewModel.sectionDates = dates
-        return viewModel
-    }
-
-    func id(_ day: Int) -> String {
-        EZCalendarAgendaLogic.dayID(for: Fixture.date(2030, 7, day), calendar: calendar)
-    }
-
-    /// One frame of list geometry: the pinned header parked at 0, and the two
-    /// free headers below it, all shifted up by `travelled` points.
-    func frame(_ viewModel: EZCalendarAgendaViewModel, pinned: Int, next: Int, travelled: Double) {
-        viewModel.trackListTravel([
-            AgendaHeaderOffset(id: id(pinned), minY: 0),
-            AgendaHeaderOffset(id: id(next), minY: 240 - travelled),
-            AgendaHeaderOffset(id: id(next + 1), minY: 500 - travelled)
-        ])
-    }
-
-    @Test("The first frame only seeds the measurement; it is not a drag")
-    func firstFrameIsNotADrag() {
-        let viewModel = makeViewModel()
-
-        frame(viewModel, pinned: 10, next: 11, travelled: 0)
-
-        #expect(viewModel.progress == 0)
-        #expect(viewModel.mode == .monthly)
-    }
-
-    @Test("Dragging up accumulates travel and collapses the calendar")
-    func draggingUpCollapses() {
-        let viewModel = makeViewModel()
-        frame(viewModel, pinned: 10, next: 11, travelled: 0)
-
-        frame(viewModel, pinned: 10, next: 11, travelled: 40)
-        #expect(abs(viewModel.progress - 0.4) < 0.000_001)
-        #expect(viewModel.mode == .monthly)
-
-        frame(viewModel, pinned: 10, next: 11, travelled: 105)
-        #expect(viewModel.progress == 1)
-        #expect(viewModel.mode == .weekly)
-    }
-
-    @Test("Travel accumulates across frames rather than resetting each one")
-    func travelAccumulates() {
-        let viewModel = makeViewModel()
-        frame(viewModel, pinned: 10, next: 11, travelled: 0)
-
-        for step in stride(from: 20.0, through: 80.0, by: 20.0) {
-            frame(viewModel, pinned: 10, next: 11, travelled: step)
-        }
-
-        #expect(abs(viewModel.progress - 0.8) < 0.000_001)
-        #expect(viewModel.mode == .monthly)
-    }
-
-    @Test("Pulling down expands, from wherever in the range the list is resting")
-    func pullingDownExpands() {
-        let viewModel = makeViewModel(mode: .weekly)
-        frame(viewModel, pinned: 20, next: 21, travelled: 0)
-
-        frame(viewModel, pinned: 20, next: 21, travelled: -45)
-        #expect(abs(viewModel.progress - 0.55) < 0.000_001)
-        #expect(viewModel.mode == .weekly)
-
-        frame(viewModel, pinned: 20, next: 21, travelled: -110)
-        #expect(viewModel.progress == 0)
-        #expect(viewModel.mode == .monthly)
-    }
-
-    @Test("The pinned header is ignored, since it never moves however far you scroll")
-    func pinnedHeaderIsExcluded() {
-        let viewModel = makeViewModel()
-
-        // Seed, then move only the free headers. If the parked one were counted,
-        // the median would be dragged towards zero and the drag would read short.
-        viewModel.trackListTravel([
-            AgendaHeaderOffset(id: id(10), minY: 0),
-            AgendaHeaderOffset(id: id(11), minY: 300)
-        ])
-        viewModel.trackListTravel([
-            AgendaHeaderOffset(id: id(10), minY: 0),
-            AgendaHeaderOffset(id: id(11), minY: 200)
-        ])
-
-        #expect(viewModel.progress == 1)
-        #expect(viewModel.mode == .weekly)
-    }
-
-    @Test("A header appearing at the edge cannot be mistaken for a drag")
-    func newHeadersAreIgnoredUntilSeenTwice() {
-        let viewModel = makeViewModel()
-        viewModel.trackListTravel([
-            AgendaHeaderOffset(id: id(10), minY: 0),
-            AgendaHeaderOffset(id: id(11), minY: 240)
-        ])
-
-        // Day 12 scrolls into view for the first time. It has no previous
-        // position, so it contributes nothing; day 11 says the list held still.
-        viewModel.trackListTravel([
-            AgendaHeaderOffset(id: id(10), minY: 0),
-            AgendaHeaderOffset(id: id(11), minY: 240),
-            AgendaHeaderOffset(id: id(12), minY: 620)
-        ])
-
-        #expect(viewModel.progress == 0)
-    }
-
-    @Test("Settling on a new day re-zeroes the gesture")
-    func settlingReZeroes() {
-        let viewModel = makeViewModel()
-        frame(viewModel, pinned: 10, next: 11, travelled: 0)
-        frame(viewModel, pinned: 10, next: 11, travelled: 105)
-        #expect(viewModel.mode == .weekly)
-
-        // The list settles on day 14; the next gesture starts from zero there.
-        viewModel.headerOffsetsChanged([AgendaHeaderOffset(id: id(14), minY: 0)])
-        #expect(viewModel.selection == Fixture.date(2030, 7, 14))
-
-        frame(viewModel, pinned: 14, next: 15, travelled: 0)
-        frame(viewModel, pinned: 14, next: 15, travelled: -110)
-        #expect(viewModel.progress == 0)
-        #expect(viewModel.mode == .monthly)
-    }
-
-    @Test("The selection is frozen mid-gesture so the zero cannot shift under it")
-    func selectionFreezesMidGesture() {
-        let viewModel = makeViewModel()
-        frame(viewModel, pinned: 10, next: 11, travelled: 0)
-        frame(viewModel, pinned: 10, next: 11, travelled: 55)
-        #expect(abs(viewModel.progress - 0.55) < 0.000_001)
-
-        // A one-line empty day pins the next header well inside the threshold.
-        viewModel.headerOffsetsChanged([AgendaHeaderOffset(id: id(11), minY: 0)])
-
-        #expect(viewModel.selection == Fixture.date(2030, 7, 10))
-        #expect(abs(viewModel.progress - 0.55) < 0.000_001)
-    }
-}
-
-@Suite("Agenda collapse settling")
-@MainActor
-struct AgendaCollapseSettleTests {
-
-    let calendar = Fixture.gregorian
-
-    func makeViewModel(mode: EZCalendarAgendaMode = .monthly) -> EZCalendarAgendaViewModel {
-        let selection = Fixture.date(2030, 7, 10)
-        let viewModel = EZCalendarAgendaViewModel(calendar: calendar, mode: mode, selection: selection)
-        viewModel.rebuildPages(from: Fixture.months([(7, 2030)]))
-        viewModel.primePagers(for: selection)
-        return viewModel
-    }
-
-    @Test("A drag released short of the threshold springs back")
-    func partialDragSpringsBack() {
-        let viewModel = makeViewModel()
-
-        viewModel.listOffsetChanged(60)
-        #expect(abs(viewModel.progress - 0.6) < 0.000_001)
-
-        // Without this, a half-finished scroll leaves the calendar frozen
-        // mid-collapse: there is no gesture-ended callback to resolve it.
-        viewModel.settleCollapse()
-
-        #expect(viewModel.progress == 0)
-        #expect(viewModel.mode == .monthly)
-    }
-
-    @Test("A partial expand springs back to weekly")
-    func partialExpandSpringsBack() {
-        let viewModel = makeViewModel(mode: .weekly)
-
-        viewModel.listOffsetChanged(-55)
-        #expect(abs(viewModel.progress - 0.45) < 0.000_001)
-
-        viewModel.settleCollapse()
-
-        #expect(viewModel.progress == 1)
-        #expect(viewModel.mode == .weekly)
-    }
-
-    @Test("Settling an already-resting calendar changes nothing")
-    func settlingAtRestIsANoOp() {
-        let viewModel = makeViewModel()
-        viewModel.settleCollapse()
-        #expect(viewModel.progress == 0)
-        #expect(viewModel.mode == .monthly)
-
-        let collapsed = makeViewModel(mode: .weekly)
-        collapsed.settleCollapse()
-        #expect(collapsed.progress == 1)
-        #expect(collapsed.mode == .weekly)
-    }
-
-    @Test("A drag that crossed the threshold has already flipped and needs no settling")
-    func crossedThresholdNeedsNoSettle() {
-        let viewModel = makeViewModel()
-
-        viewModel.listOffsetChanged(140)
-        #expect(viewModel.mode == .weekly)
-        #expect(viewModel.progress == 1)
-
-        viewModel.settleCollapse()
-        #expect(viewModel.mode == .weekly)
-        #expect(viewModel.progress == 1)
     }
 }

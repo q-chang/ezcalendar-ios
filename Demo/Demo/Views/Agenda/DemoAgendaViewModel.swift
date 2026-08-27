@@ -31,10 +31,6 @@ final class DemoAgendaViewModel: ObservableObject {
     @Published var mode: EZCalendarAgendaMode = .monthly
     @Published var selectedDate: Date
 
-    /// Every state change worth watching, newest first — the demo prints these
-    /// on screen so the two-way sync can be checked without a debugger.
-    @Published var log: [String] = []
-
     private let startDate: Date
     private let endDate: Date
 
@@ -84,11 +80,6 @@ final class DemoAgendaViewModel: ObservableObject {
     func dayNumber(_ date: Date?) -> String {
         guard let date else { return "" }
         return "\(calendar.component(.day, from: date))"
-    }
-
-    func note(_ message: String) {
-        log.insert(message, at: 0)
-        if log.count > 4 { log.removeLast() }
     }
 
     // MARK: - Sample data

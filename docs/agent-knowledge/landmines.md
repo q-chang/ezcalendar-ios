@@ -229,14 +229,17 @@ list opens scrolled thousands of points down onto the selected day, so the singl
 reported value is `0` — and stays `0` forever.
 
 **This fails silently.** There is no warning and no crash; whatever is built on
-the probe simply never runs. The scroll-driven collapse gesture was completely
-dead for several build-and-look cycles before an on-screen debug overlay showed
-`n1` — one callback, ever.
+the probe simply never runs. A scroll-driven collapse gesture built on one was
+completely dead for several build-and-look cycles before an on-screen debug
+overlay showed `n1` — one callback, ever.
 
 The section headers *do* keep reporting, because a `LazyVStack` only materialises
-them near the viewport. `EZCalendarAgendaViewModel.trackListTravel(_:)` therefore
-accumulates scroll distance frame by frame from header movement instead of
-measuring an absolute offset.
+them near the viewport. If you need a scroll measurement in this list, derive it
+from those.
+
+(The gesture that prompted this has since been removed — the collapse is driven
+by the grab handle alone — but the measurement trap is unchanged and will catch
+the next thing built here.)
 
 If you need a scroll offset here, measure something that lives near the viewport,
 and **verify it updates more than once** before building on it.
@@ -246,7 +249,8 @@ and **verify it updates more than once** before building on it.
 Related, and the trap one level down: with `pinnedViews: [.sectionHeaders]`, the
 *pinned* header sits at `minY == 0` for as long as its section is on screen,
 however far the list scrolls. Anchoring a measurement to it yields a constant
-zero. `trackListTravel` excludes headers parked at the top edge for this reason.
+zero. Any measurement derived from header positions has to exclude the one parked
+at the top edge.
 
 ---
 

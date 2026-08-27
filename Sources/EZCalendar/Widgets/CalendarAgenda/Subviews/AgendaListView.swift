@@ -8,27 +8,19 @@
 import SwiftUI
 
 /// The bottom half of the agenda: a continuous, date-grouped list with sticky
-/// headers, which doubles as the collapse gesture's driver.
+/// headers.
 ///
-/// ## Why the list can collapse the calendar without fighting itself
+/// ## The list never changes the mode
 ///
-/// A `DragGesture` laid over a `ScrollView` competes with it: one of the two
-/// wins each frame and the result feels broken. This view never adds that
-/// gesture. It reads the list's **own scroll offset** and lets
-/// `EZCalendarAgendaLogic.progress(forListOffset:mode:threshold:)` decide how
-/// much of that movement the collapse consumes:
+/// Scrolling here scrolls here, and nothing else. The calendar switches between
+/// `.monthly` and `.weekly` only through the grab handle above the list (or the
+/// caller's `mode` binding, or a day tap).
 ///
-/// ```
-/// .monthly, list at top     scroll up  →  offset 0 → 100  →  calendar collapses
-/// .weekly,  list mid-content scroll     →  offset changes  →  calendar unaffected
-/// .weekly,  list at top     over-scroll →  offset 0 → -100 →  calendar expands
-/// ```
-///
-/// The collapse therefore only ever consumes movement the list itself has no use
-/// for, which is exactly the rule that makes the interaction feel native.
-///
-/// The grab handle above the list adds an explicit `DragGesture` for users who
-/// reach for it, and it outranks the scroll driver while the finger is down.
+/// An earlier version drove the collapse from this list's scroll offset, on the
+/// theory that it would feel native. It did not: reading down through a busy
+/// day's events collapsed the calendar out from under you, and an over-scroll at
+/// the top expanded it again — both without being asked. The gesture is worth
+/// having only where it is unambiguous, which is the handle.
 ///
 /// ## The sticky header is the sync signal
 ///
@@ -57,9 +49,15 @@ struct AgendaListView<Event: Identifiable, ListHeaderView: View, EventItemView: 
         }
     }
 
-    /// The caller's grab pill, with the one explicit collapse gesture in the
-    /// component. `minimumDistance: 1` keeps a tap on the handle from being read
-    /// as a zero-length drag.
+    /// The caller's grab pill — the only surface in the component that switches
+    /// modes by gesture.
+    ///
+    /// `contentShape` makes the caller's whole handle frame draggable rather than
+    /// just the pixels they drew, so a thin pill is still a usable target. How
+    /// tall that frame is remains the caller's call; the library does not pad it.
+    ///
+    /// `minimumDistance: 1` keeps a tap on the handle from registering as a
+    /// zero-length drag.
     private var grabHandle: some View {
         handleViewContent()
             .contentShape(Rectangle())

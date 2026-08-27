@@ -323,7 +323,8 @@ The longer initializer adds `titleViewContent`, `emptyDayViewContent` and `handl
 | --- | --- |
 | Tap a day | The list scrolls that day's sticky header to the top. In `.monthly` the tap also snaps the calendar to `.weekly`. |
 | Scroll the list | Whichever sticky header is pinned at the top becomes the selected day; the calendar pages itself to follow. |
-| Scroll up out of `.monthly` | The calendar collapses, non-selected weeks fading as it closes. Over-scrolling the top of `.weekly` expands it again. |
+| Drag the grab handle | Up out of `.monthly` collapses, down out of `.weekly` expands, switching as soon as the drag passes `collapseThreshold`. Non-selected weeks fade as the grid closes. |
+| Scroll the event list | Scrolls the list. It never changes the mode, in either direction, over-scroll included. |
 | Swipe the calendar in `.monthly` | Selects the 1st of the new month — or today, if today falls in it. |
 | Swipe the calendar in `.weekly` | Selects the week's first day — or today, if today falls in that week. |
 
@@ -334,7 +335,7 @@ Page it programmatically with `EZCalendarAgendaPaging.selection(paging:from:mode
 | Modifier | Default | Effect |
 | --- | --- | --- |
 | `.gridLineColor(_:)` | `nil` | Colour showing through the grid's 1pt gaps. |
-| `.collapseThreshold(_:)` | `100` | Points of drag or scroll that make a full collapse or expand. |
+| `.collapseThreshold(_:)` | `100` | How far the grab handle must be dragged to switch modes. |
 | `.collapseAnimation(_:)` | `.snappy(duration: 0.28)` | How a released gesture settles. |
 
 > **Use `context.hasEvents`, not `context.day.hasEvents`.** The agenda buckets your events by *day*, so its flag works for events stamped at a real time and for padding days — neither of which `CalendarDay.hasEvents` handles. See limitation 2 below.
@@ -459,7 +460,7 @@ The suite covers `EZCalendarAgendaView`'s logic — page building, selection rul
 
 The Demo's Swift package reference points at this repository, so it builds the sources in `Sources/EZCalendar` directly.
 
-It includes an **Agenda** screen exercising `EZCalendarAgendaView`: tap-to-select with auto-collapse, two-way scroll sync, drag-to-collapse, and manual paging.
+It includes an **Agenda** screen exercising `EZCalendarAgendaView`: tap-to-select with auto-collapse, two-way scroll sync, handle-drag collapse, and manual paging.
 
 ---
 

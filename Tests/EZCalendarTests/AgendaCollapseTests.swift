@@ -14,148 +14,66 @@ struct AgendaCollapseTests {
 
     let threshold: Double = 100
 
-    // MARK: - Progress from the list's scroll offset
+    // MARK: - The handle drag decides by threshold, not by tracking
 
     @Test(
-        "Scrolling the list up out of .monthly collapses proportionally",
+        "Dragging the handle up out of .monthly switches only once past the threshold",
         arguments: [
-            (offset: 0.0, progress: 0.0),
-            (offset: 25.0, progress: 0.25),
-            (offset: 50.0, progress: 0.5),
-            (offset: 100.0, progress: 1.0),
-            (offset: 400.0, progress: 1.0)
+            (translation: 0.0, expected: EZCalendarAgendaMode.monthly),
+            (translation: -40.0, expected: .monthly),
+            (translation: -99.0, expected: .monthly),
+            (translation: -100.0, expected: .weekly),
+            (translation: -260.0, expected: .weekly)
         ]
     )
-    func listScrollCollapsesFromMonthly(offset: Double, progress: Double) {
-        let result = EZCalendarAgendaLogic.progress(
-            forListOffset: offset,
-            mode: .monthly,
-            threshold: threshold
-        )
-
-        #expect(result == progress)
-    }
-
-    @Test("Rubber-banding above the top of a .monthly list cannot over-expand it")
-    func overscrollInMonthlyStaysExpanded() {
-        let result = EZCalendarAgendaLogic.progress(
-            forListOffset: -80,
-            mode: .monthly,
-            threshold: threshold
-        )
-
-        #expect(result == 0)
-    }
-
-    @Test(
-        "In .weekly only an over-scroll past the top expands the calendar",
-        arguments: [
-            (offset: 500.0, progress: 1.0),   // deep in the list: no effect
-            (offset: 0.0, progress: 1.0),     // parked at the top: no effect
-            (offset: -30.0, progress: 0.7),   // rubber-banding: expanding
-            (offset: -100.0, progress: 0.0),  // full expand
-            (offset: -260.0, progress: 0.0)   // clamped
-        ]
-    )
-    func listScrollExpandsFromWeekly(offset: Double, progress: Double) {
-        let result = EZCalendarAgendaLogic.progress(
-            forListOffset: offset,
-            mode: .weekly,
-            threshold: threshold
-        )
-
-        #expect(abs(result - progress) < 0.000_001)
-    }
-
-    @Test("Ordinary scrolling inside a .weekly list never touches the calendar")
-    func scrollingWithinWeeklyIsInert() {
-        // This is the property that makes the gesture feel native: once
-        // collapsed, the list owns every downward pixel.
-        for offset in stride(from: 0.0, through: 900.0, by: 60.0) {
-            let result = EZCalendarAgendaLogic.progress(
-                forListOffset: offset,
-                mode: .weekly,
-                threshold: threshold
-            )
-
-            #expect(result == 1)
-        }
-    }
-
-    // MARK: - Progress from the grab handle
-
-    @Test(
-        "Dragging the handle up out of .monthly collapses proportionally",
-        arguments: [
-            (translation: 0.0, progress: 0.0),
-            (translation: -40.0, progress: 0.4),
-            (translation: -100.0, progress: 1.0),
-            (translation: -300.0, progress: 1.0)
-        ]
-    )
-    func handleDragCollapses(translation: Double, progress: Double) {
-        let result = EZCalendarAgendaLogic.progress(
+    func handleDragCollapsesAtThreshold(translation: Double, expected: EZCalendarAgendaMode) {
+        let result = EZCalendarAgendaLogic.mode(
             forHandleTranslation: translation,
-            mode: .monthly,
+            from: .monthly,
             threshold: threshold
         )
 
-        #expect(abs(result - progress) < 0.000_001)
+        #expect(result == expected)
     }
 
     @Test(
-        "Dragging the handle down out of .weekly expands proportionally",
+        "Dragging the handle down out of .weekly switches only once past the threshold",
         arguments: [
-            (translation: 0.0, progress: 1.0),
-            (translation: 60.0, progress: 0.4),
-            (translation: 100.0, progress: 0.0),
-            (translation: 300.0, progress: 0.0)
+            (translation: 0.0, expected: EZCalendarAgendaMode.weekly),
+            (translation: 55.0, expected: .weekly),
+            (translation: 99.0, expected: .weekly),
+            (translation: 100.0, expected: .monthly),
+            (translation: 300.0, expected: .monthly)
         ]
     )
-    func handleDragExpands(translation: Double, progress: Double) {
-        let result = EZCalendarAgendaLogic.progress(
+    func handleDragExpandsAtThreshold(translation: Double, expected: EZCalendarAgendaMode) {
+        let result = EZCalendarAgendaLogic.mode(
             forHandleTranslation: translation,
-            mode: .weekly,
+            from: .weekly,
             threshold: threshold
         )
 
-        #expect(abs(result - progress) < 0.000_001)
+        #expect(result == expected)
     }
 
-    @Test("Dragging the handle the wrong way does nothing")
+    @Test("Dragging the handle the wrong way never switches, however far it goes")
     func wrongWayDragsAreInert() {
-        #expect(EZCalendarAgendaLogic.progress(forHandleTranslation: 120, mode: .monthly, threshold: threshold) == 0)
-        #expect(EZCalendarAgendaLogic.progress(forHandleTranslation: -120, mode: .weekly, threshold: threshold) == 1)
+        #expect(EZCalendarAgendaLogic.mode(forHandleTranslation: 400, from: .monthly, threshold: threshold) == .monthly)
+        #expect(EZCalendarAgendaLogic.mode(forHandleTranslation: -400, from: .weekly, threshold: threshold) == .weekly)
     }
 
-    @Test("A zero or negative threshold cannot divide by zero; the mode simply holds")
+    @Test("A custom threshold moves the switching point")
+    func thresholdIsHonoured() {
+        // Half the distance is enough…
+        #expect(EZCalendarAgendaLogic.mode(forHandleTranslation: -50, from: .monthly, threshold: 50) == .weekly)
+        // …and twice the distance is not.
+        #expect(EZCalendarAgendaLogic.mode(forHandleTranslation: -50, from: .monthly, threshold: 200) == .monthly)
+    }
+
+    @Test("A zero or negative threshold cannot switch modes by accident")
     func degenerateThresholdHoldsTheMode() {
-        #expect(EZCalendarAgendaLogic.progress(forListOffset: 50, mode: .monthly, threshold: 0) == 0)
-        #expect(EZCalendarAgendaLogic.progress(forListOffset: 50, mode: .weekly, threshold: 0) == 1)
-        #expect(EZCalendarAgendaLogic.progress(forHandleTranslation: -50, mode: .monthly, threshold: -10) == 0)
-    }
-
-    @Test("A custom threshold rescales the whole gesture")
-    func thresholdRescalesTheGesture() {
-        // Half the threshold, so half the travel is a full collapse.
-        #expect(EZCalendarAgendaLogic.progress(forListOffset: 50, mode: .monthly, threshold: 50) == 1)
-        #expect(EZCalendarAgendaLogic.progress(forListOffset: 50, mode: .monthly, threshold: 200) == 0.25)
-    }
-
-    // MARK: - Where a released gesture settles
-
-    @Test("A drag that crosses the threshold snaps to the other mode")
-    func fullDragSnapsAcross() {
-        #expect(EZCalendarAgendaLogic.resolvedMode(progress: 1, from: .monthly) == .weekly)
-        #expect(EZCalendarAgendaLogic.resolvedMode(progress: 0, from: .weekly) == .monthly)
-    }
-
-    @Test("A drag that stops short springs back to where it started")
-    func partialDragSpringsBack() {
-        #expect(EZCalendarAgendaLogic.resolvedMode(progress: 0.99, from: .monthly) == .monthly)
-        #expect(EZCalendarAgendaLogic.resolvedMode(progress: 0.5, from: .monthly) == .monthly)
-        #expect(EZCalendarAgendaLogic.resolvedMode(progress: 0.01, from: .weekly) == .weekly)
-        #expect(EZCalendarAgendaLogic.resolvedMode(progress: 0.5, from: .weekly) == .weekly)
+        #expect(EZCalendarAgendaLogic.mode(forHandleTranslation: -500, from: .monthly, threshold: 0) == .monthly)
+        #expect(EZCalendarAgendaLogic.mode(forHandleTranslation: 500, from: .weekly, threshold: -10) == .weekly)
     }
 
     @Test("A mode's resting progress is its own end of the range")
@@ -227,27 +145,4 @@ struct AgendaCollapseTests {
         #expect(EZCalendarAgendaLogic.rowOpacity(rowIndex: 4, selectedRowIndex: selected, progress: 1) == 0)
     }
 
-    // MARK: - The two drivers agree
-
-    @Test("A handle drag and a list scroll of the same distance produce the same collapse")
-    func bothDriversAgree() {
-        // The handle reports upward movement as a negative translation; the list
-        // reports the same movement as a positive offset. Normalised, they are
-        // the same gesture — which is why the view has one transition path.
-        for distance in stride(from: 0.0, through: 100.0, by: 10.0) {
-            let fromHandle = EZCalendarAgendaLogic.progress(
-                forHandleTranslation: -distance,
-                mode: .monthly,
-                threshold: threshold
-            )
-
-            let fromList = EZCalendarAgendaLogic.progress(
-                forListOffset: distance,
-                mode: .monthly,
-                threshold: threshold
-            )
-
-            #expect(fromHandle == fromList)
-        }
-    }
 }

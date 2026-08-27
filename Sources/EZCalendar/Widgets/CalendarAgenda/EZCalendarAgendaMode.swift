@@ -15,7 +15,7 @@ import Foundation
 
  | Driver | What happens |
  | --- | --- |
- | The user drags the list | The mode flips once the drag passes the snap threshold. |
+ | The user drags the grab handle | The mode flips once the drag passes the snap threshold. |
  | The user taps a day while `.monthly` | The mode auto-snaps to `.weekly`. |
  | The caller assigns the binding | The calendar animates to the new mode. |
 
@@ -35,12 +35,6 @@ public enum EZCalendarAgendaMode: String, Hashable, Sendable, CaseIterable {
 
     /// A single week row: the week containing the selected date.
     case weekly
-
-    /// The mode reached by collapsing this one. `.weekly` is already collapsed.
-    var collapsed: EZCalendarAgendaMode { .weekly }
-
-    /// The mode reached by expanding this one. `.monthly` is already expanded.
-    var expanded: EZCalendarAgendaMode { .monthly }
 
     /// `0` for `.monthly`, `1` for `.weekly` — the resting value of the
     /// collapse progress that drives every interactive animation in the view.
