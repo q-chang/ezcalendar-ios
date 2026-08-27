@@ -111,7 +111,7 @@
 			mainGroup = A75AE8B42D33B2A40052BADA;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				A76336F52E8519900034222E /* XCLocalSwiftPackageReference "../../EZCalendar-Swift" */,
+				A76336F52E8519900034222E /* XCLocalSwiftPackageReference ".." */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = A75AE8BE2D33B2A40052BADA /* Products */;
@@ -356,9 +356,9 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		A76336F52E8519900034222E /* XCLocalSwiftPackageReference "../../EZCalendar-Swift" */ = {
+		A76336F52E8519900034222E /* XCLocalSwiftPackageReference ".." */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = "../../EZCalendar-Swift";
+			relativePath = "..";
 		};
 /* End XCLocalSwiftPackageReference section */
 

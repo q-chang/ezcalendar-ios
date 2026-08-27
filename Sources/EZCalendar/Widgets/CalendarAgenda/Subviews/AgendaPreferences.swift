@@ -35,16 +35,6 @@ struct AgendaHeaderOffsetKey: PreferenceKey {
     }
 }
 
-/// How far the list has scrolled past its top: positive into content, negative
-/// while rubber-banding above the first section.
-struct AgendaListOffsetKey: PreferenceKey {
-    static var defaultValue: Double { 0 }
-
-    static func reduce(value: inout Double, nextValue: () -> Double) {
-        value = nextValue()
-    }
-}
-
 extension View {
 
     /// Reports this view's natural height under `id`.
@@ -80,17 +70,18 @@ extension View {
         )
     }
 
-    /// Reports how far the list content has travelled past the top of its
-    /// scroll view. The content's own top edge is the only probe needed:
-    /// negated, its `minY` *is* the scroll offset.
-    func measureListOffset() -> some View {
-        background(
-            GeometryReader { proxy in
-                Color.clear.preference(
-                    key: AgendaListOffsetKey.self,
-                    value: -proxy.frame(in: .named(AgendaCoordinateSpace.list)).minY
-                )
-            }
-        )
-    }
+    // NOTE: there is deliberately no whole-content scroll-offset probe here, and
+    // adding one back will not work.
+    //
+    // Two obvious probes were tried and both fail the same way: a
+    // `GeometryReader` in the `background` of the `LazyVStack`, and a 1pt
+    // sentinel above it. Each reports exactly once, on first layout, and then
+    // goes permanently silent — SwiftUI stops resolving geometry for views far
+    // outside the viewport, and this list opens scrolled thousands of points
+    // down onto the selected day. A silent probe is worse than none: it disables
+    // whatever is built on it without failing.
+    //
+    // The section headers above are the one measurement that stays live, because
+    // they only exist while they are near the viewport. The collapse is derived
+    // from them — see `EZCalendarAgendaViewModel.trackListTravel(_:)`.
 }

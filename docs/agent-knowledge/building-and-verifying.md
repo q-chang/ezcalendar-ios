@@ -34,9 +34,8 @@ it, builds, installs, and launches. Derived data goes to `.build/demo-dd`, cover
 by the existing `/.build` gitignore rule. Device name can also come from
 `$EZ_DEMO_DEVICE`.
 
-> ⚠️ **This does not validate library changes.** The Demo links a sibling checkout
-> — [landmine #1](landmines.md#1-the-demo-does-not-build-this-repos-sources). The
-> script warns on every run.
+> ✅ **This validates library changes.** The Demo's package reference points at
+> this repository's root, so what you see running is the code in `Sources/`.
 
 Raw equivalent, if you need to vary something the script doesn't expose:
 

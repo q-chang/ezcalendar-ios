@@ -38,7 +38,7 @@ xcodebuild -workspace EZCalendar.xcworkspace -scheme Demo \
 
 Either way it takes a few minutes on a cold build.
 
-> ⚠️ **The Demo builds against a sibling checkout, not this repo.** `Demo/Demo.xcodeproj` has an `XCLocalSwiftPackageReference` with `relativePath = "../../EZCalendar-Swift"` — a *different* clone (remote `wisanu-dev/EZCalendar-Swift`) that is behind this one. A green Demo build does **not** validate your changes to `Sources/EZCalendar`. Either repoint that reference, or rely on `swift build` plus a temporary test target (see the `verify-calendar-grid` skill).
+> ✅ **The Demo builds this repo's `Sources/`.** `Demo/Demo.xcodeproj` has an `XCLocalSwiftPackageReference` with `relativePath = ".."`, the repository root, so a green Demo build *does* validate your library changes. It used to point at a sibling checkout (`../../EZCalendar-Swift`); if you read otherwise anywhere, that doc is stale.
 
 ## Known-broken: the `EZCalendar` xcodeproj scheme
 

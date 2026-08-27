@@ -177,3 +177,14 @@ struct AgendaWeekPage: Identifiable, Hashable {
     let firstDate: Date
     let days: [CalendarDay]
 }
+
+
+/// One request for the agenda list to scroll somewhere.
+///
+/// `animated` is `false` only for the very first positioning, which can be
+/// months from the top of the range — animating that would scroll visibly
+/// through every section in between.
+struct AgendaScrollRequest: Equatable {
+    let id: String
+    let animated: Bool
+}

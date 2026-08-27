@@ -9,7 +9,7 @@ debugging session on a bug you did not write.
 
 | # | Landmine | Class |
 | --- | --- | --- |
-| [1](#1-the-demo-does-not-build-this-repos-sources) | Demo links a sibling checkout | 🔴 wasted work |
+| [1](#1-the-demo-now-builds-this-repo-fixed) | ~~Demo links a sibling checkout~~ — **fixed** | ✅ resolved |
 | [2](#2-ezcalendarxcodeproj-is-stale-and-does-not-build) | `EZCalendar.xcodeproj` is broken | 🔴 false alarm |
 | [3](#3-calendarfirstweekday-is-ignored) | `firstWeekday` ignored | 🟠 wrong output |
 | [4](#4-event-matching-is-exact-date-equality) | Exact `Date` equality for events | 🟠 silent no-match |
@@ -19,31 +19,24 @@ debugging session on a bug you did not write.
 | [8](#8-datestartofmonth--endofmonth-hardcode-gregorian) | Gregorian hardcoded | 🟡 latent |
 | [9](#9-addingcomponentsofdate-uses-calendarcurrent) | `Calendar.current` leak | 🟡 latent |
 | [10](#10-dateswift-exists-twice) | `Date+.swift` exists twice | 🟡 edit the wrong one |
+| [11](#11-geometry-probes-go-silent-off-screen) | Off-screen `GeometryReader`s stop reporting | 🔴 silent dead feature |
+| [12](#12-scrollto-into-a-long-lazyvstack-lands-approximately) | `scrollTo` lands short in a long `LazyVStack` | 🟠 wrong output |
 
 ---
 
-## 1. The Demo does not build this repo's sources
+## 1. The Demo now builds this repo (FIXED)
 
-`Demo/Demo.xcodeproj/project.pbxproj` contains:
+This used to be the worst trap in the repository: the Demo's package reference
+was `relativePath = "../../EZCalendar-Swift"`, a *different clone with a
+different remote*, so editing `Sources/EZCalendar/` here and building the Demo
+validated nothing.
 
-```
-XCLocalSwiftPackageReference "../../EZCalendar-Swift"
-    relativePath = "../../EZCalendar-Swift";
-```
+**It was repointed to `relativePath = ".."` — this repository.** A green Demo
+build now does exercise your library changes, and `scripts/demo/run-demo.sh` no
+longer warns.
 
-That resolves to `/Users/wisanu/Workspaces/iOS/EZCalendar-Swift` — a **different
-clone with a different remote** (`wisanu-dev/EZCalendar-Swift`, vs this repo's
-`q-chang/ezcalendar-ios`). At time of writing it is one commit behind and its
-files differ.
-
-**Editing `Sources/EZCalendar/` here and building the Demo validates nothing.**
-`xcodebuild ... -scheme Demo` will report BUILD SUCCEEDED against code you did not
-change.
-
-`scripts/demo/run-demo.sh` prints a warning about this on every run.
-
-If asked to verify a library change in the Demo: say so, then either repoint the
-package reference or fall back to `swift build` plus the grid harness.
+Kept here because the old advice is still in circulation: if you find a comment,
+commit message or doc saying the Demo builds a sibling checkout, that is stale.
 
 ---
 
@@ -212,3 +205,63 @@ it looks.
 They have **diverged**. Changing one does not change the other, and the Demo's
 calls to `Date.from(...)` resolve to its own copy — not to the library. See
 [public-api.md](public-api.md#the-date-extension-is-not-public-api).
+
+
+---
+
+## 11. Geometry probes go silent off-screen
+
+Measuring a scroll view's content offset with a `GeometryReader` **only works
+while the probe is near the viewport**. Two natural-looking probes were tried in
+`EZCalendarAgendaView` and both failed identically:
+
+```swift
+// ❌ background of the LazyVStack — with a few hundred sections this view is
+//    tens of thousands of points tall
+LazyVStack { ... }.background(GeometryReader { ... })
+
+// ❌ a 1pt sentinel above the content
+ScrollView { Color.clear.frame(height: 1).background(GeometryReader { ... }); LazyVStack { ... } }
+```
+
+Both report **exactly once**, on first layout, and then never again. The agenda
+list opens scrolled thousands of points down onto the selected day, so the single
+reported value is `0` — and stays `0` forever.
+
+**This fails silently.** There is no warning and no crash; whatever is built on
+the probe simply never runs. The scroll-driven collapse gesture was completely
+dead for several build-and-look cycles before an on-screen debug overlay showed
+`n1` — one callback, ever.
+
+The section headers *do* keep reporting, because a `LazyVStack` only materialises
+them near the viewport. `EZCalendarAgendaViewModel.trackListTravel(_:)` therefore
+accumulates scroll distance frame by frame from header movement instead of
+measuring an absolute offset.
+
+If you need a scroll offset here, measure something that lives near the viewport,
+and **verify it updates more than once** before building on it.
+
+### 11b. A pinned header never moves
+
+Related, and the trap one level down: with `pinnedViews: [.sectionHeaders]`, the
+*pinned* header sits at `minY == 0` for as long as its section is on screen,
+however far the list scrolls. Anchoring a measurement to it yields a constant
+zero. `trackListTravel` excludes headers parked at the top edge for this reason.
+
+---
+
+## 12. `scrollTo` into a long `LazyVStack` lands approximately
+
+`ScrollViewProxy.scrollTo(id, anchor: .top)` across a few hundred
+variable-height sections does not land exactly. SwiftUI estimates the offsets of
+rows it has not built yet, and the estimate drifts over a long hop.
+
+Undershooting by even one header height is not cosmetic in a two-way-synced list:
+the *previous* day's header stays pinned at the top, the sync reads it as the day
+on screen, and the calendar selects **the day before the one the user tapped**.
+Reproduced by tapping 5 August and landing on 4 August.
+
+`EZCalendarAgendaViewModel.correctScroll(towards:)` re-issues the scroll once the
+target is materialised — at which point the estimate is exact — with a capped
+number of attempts so an unreachable target (the last day in the range) cannot
+wedge the sync latch open.

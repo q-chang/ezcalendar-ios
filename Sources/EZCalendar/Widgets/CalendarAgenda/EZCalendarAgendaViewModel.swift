@@ -75,6 +75,15 @@ final class EZCalendarAgendaViewModel: ObservableObject {
     /// `0` = full month, `1` = single week. Continuous while a gesture is live.
     @Published var progress: Double = 0
 
+    /// `true` from the moment a mode change starts until its animation finishes.
+    ///
+    /// This exists because `progress` is a *model* value: `withAnimation` sets it
+    /// to its target instantly and animates only what SwiftUI interpolates from
+    /// it. Anything that branches — like "which pager is on screen" — would
+    /// therefore switch on the first frame and cross-fade the two pagers on top
+    /// of each other for the whole transition. Branch on this instead.
+    @Published private(set) var isTransitioning = false
+
     /// Natural, *unclipped* height of each month page's grid, keyed by page id.
     /// Measured at runtime — the library states no opinion about cell height, so
     /// the collapse animation has no constant it could use instead.
@@ -85,9 +94,9 @@ final class EZCalendarAgendaViewModel: ObservableObject {
     /// Where each visible section header sits, in the list's coordinate space.
     @Published private(set) var headerOffsets: [AgendaHeaderOffset] = []
 
-    /// Section id the list should scroll to. The view watches this inside its
-    /// `ScrollViewReader` and calls `scrollTo`.
-    @Published var scrollTarget: String?
+    /// What the list should scroll to, and whether to animate getting there.
+    /// The view watches this inside its `ScrollViewReader` and calls `scrollTo`.
+    @Published var scrollRequest: AgendaScrollRequest?
 
     /// `dayID` → date, so a reported header id can be turned back into a day.
     var sectionDates: [String: Date] = [:]
@@ -99,6 +108,35 @@ final class EZCalendarAgendaViewModel: ObservableObject {
     private var isHandleDragging = false
     private var listSyncRelease: Task<Void, Never>?
     private var pagerSyncRelease: Task<Void, Never>?
+    private var collapseSettle: Task<Void, Never>?
+
+    /// The section id an in-flight scroll is heading for. The list latch is
+    /// released the moment this one reports itself pinned — see
+    /// `headerOffsetsChanged(_:)`.
+    private var pendingScrollTarget: String?
+
+    /// The very first scroll positions the list on the selected day. That one
+    /// must not animate: the day can be months from the top of the range, and
+    /// animating there would scroll through every section in between.
+    private var hasPositionedList = false
+
+    /// Scroll offset the list last reported, and the offset it was resting at
+    /// when the current mode settled. The collapse is driven by the difference.
+    /// Header positions from the previous frame, and how far the list has
+    /// travelled since it last came to rest. See `trackListTravel(_:)`.
+    private var previousHeaderOffsets: [String: Double] = [:]
+    private var listTravel: Double = 0
+
+    /// A header parked at the top edge is the pinned one and never moves, so it
+    /// says nothing about scrolling. This is how close to zero counts as parked.
+    private let pinnedSlack: Double = 1
+
+    /// Re-issues left for the current scroll. See `correctScroll(towards:)`.
+    private var scrollCorrectionsRemaining = 0
+
+    /// How close to the top edge the target header has to land, in points,
+    /// before the scroll counts as arrived.
+    private let arrivalSlack: Double = 2
 
     // MARK: - Mirrored caller state
     //
@@ -267,10 +305,37 @@ final class EZCalendarAgendaViewModel: ObservableObject {
     /// about to appear so the swap between the month and week pagers is
     /// invisible: both show the same week, in the same place, at `progress == 1`.
     func modeChanged() {
+        // The pager for the incoming mode is about to be created. A freshly
+        // created `ScrollView` can report its own initial position back through
+        // `scrollPosition(id:)`, which would read as a user swipe and rewrite
+        // the selection — so latch before it appears, not only when we move it.
+        holdPagerLatch()
+
         syncPager(to: selection, mode: mode)
 
-        withAnimation(collapseAnimation) {
-            progress = mode.progress
+        resetListTravel()
+
+        let target = mode.progress
+
+        // A gesture that ran all the way to the end has already put `progress`
+        // where it belongs; animating a no-op would raise and drop
+        // `isTransitioning` for one frame and flicker the pager swap.
+        guard progress != target else { return }
+
+        isTransitioning = true
+
+        withAnimation(collapseAnimation, completionCriteria: .removed) {
+            progress = target
+        } completion: {
+            // Swap the pagers without an implicit animation of their own: the
+            // two are geometrically identical at this point, so the change
+            // should have no visual signature at all.
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+
+            withTransaction(transaction) {
+                self.isTransitioning = false
+            }
         }
     }
 
@@ -296,6 +361,46 @@ final class EZCalendarAgendaViewModel: ObservableObject {
         let resolved = EZCalendarAgendaLogic.resolvedMode(progress: newProgress, from: current)
         if resolved != current {
             mode = resolved
+        } else {
+            scheduleCollapseSettle()
+        }
+    }
+
+    /// A scroll-driven collapse has no "gesture ended" callback the way a
+    /// `DragGesture` does — iOS 17 offers no scroll-phase signal — so a drag that
+    /// stops half way would leave the calendar frozen mid-collapse forever.
+    ///
+    /// This settles it a beat after the list goes quiet. Each new movement
+    /// cancels the pending settle, so it only fires once the scroll has genuinely
+    /// stopped, momentum included.
+    private func scheduleCollapseSettle() {
+        collapseSettle?.cancel()
+
+        // Already resting at one end; nothing to settle.
+        guard progress > 0, progress < 1 else { return }
+
+        collapseSettle = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 140_000_000)
+            guard !Task.isCancelled else { return }
+            self?.settleCollapse()
+        }
+    }
+
+    /// Resolves a half-finished collapse: past the threshold it would already
+    /// have flipped the mode, so anything still in between springs back to where
+    /// the gesture started.
+    func settleCollapse() {
+        guard progress > 0, progress < 1 else { return }
+
+        let resolved = EZCalendarAgendaLogic.resolvedMode(progress: progress, from: mode)
+
+        if resolved != mode {
+            mode = resolved
+        } else {
+            withAnimation(collapseAnimation) {
+                progress = mode.progress
+            }
+            resetListTravel()
         }
     }
 
@@ -386,14 +491,16 @@ final class EZCalendarAgendaViewModel: ObservableObject {
             let id = monthPages[index].id
             guard id != visibleMonthID else { return }
 
-            withPagerLatch { withAnimation { self.visibleMonthID = id } }
+            holdPagerLatch()
+            withAnimation { visibleMonthID = id }
 
         case .weekly:
             guard let index = EZCalendarAgendaLogic.index(ofWeekContaining: date, in: weekPages, calendar: calendar) else { return }
             let id = weekPages[index].id
             guard id != visibleWeekID else { return }
 
-            withPagerLatch { withAnimation { self.visibleWeekID = id } }
+            holdPagerLatch()
+            withAnimation { visibleWeekID = id }
         }
     }
 
@@ -415,15 +522,112 @@ final class EZCalendarAgendaViewModel: ObservableObject {
     func headerOffsetsChanged(_ offsets: [AgendaHeaderOffset]) {
         headerOffsets = offsets
 
-        // Do not read the list back while we are the ones moving it.
-        guard !isDrivingList else { return }
+        let topID = EZCalendarAgendaLogic.topMostSectionID(headerOffsets: offsets)
 
-        guard let id = EZCalendarAgendaLogic.topMostSectionID(headerOffsets: offsets),
-              let date = sectionDates[id],
+        // Do not read the list back while we are the ones moving it.
+        // While we are animating the list ourselves, its movement is not a
+        // gesture and must not drive the collapse.
+        if isDrivingList {
+            // Release on *arrival* rather than on a timer. A timer has to guess
+            // how long the scroll takes, and guessing short is catastrophic: the
+            // latch lifts mid-flight, every header the list is still flying past
+            // rewrites the selection, and each rewrite starts another scroll.
+            correctScroll(towards: offsets)
+            return
+        }
+
+        trackListTravel(offsets)
+
+        // Do not re-anchor mid-gesture. A short section — an empty day is barely
+        // taller than its own header — would otherwise hand the anchor to the
+        // next day before the collapse could finish, and the gesture would stall
+        // half way with nothing to measure against.
+        guard progress <= 0 || progress >= 1 else { return }
+
+        guard let topID,
+              let date = sectionDates[topID],
               !calendar.isDate(date, inSameDayAs: selection)
         else { return }
 
         selection = date
+
+        // The list has settled on a new day, so that is the new "at rest"
+        // position the next collapse gesture is measured from.
+        resetListTravel()
+    }
+
+    /// Turns the list's scroll into collapse progress.
+    ///
+    /// The measurement is deliberately *relative*: how far the **selected day's**
+    /// own sticky header has been dragged away from the top edge, not how far the
+    /// list has scrolled overall.
+    ///
+    /// Absolute scroll offset cannot work here. The list opens already scrolled
+    /// to the selected day, which is typically months into the range, so an
+    /// absolute measure reads as "miles from the top" before the user has
+    /// touched anything — and the calendar would collapse on launch. Anchoring to
+    /// the selected day instead makes "the list is at its top" mean "the day you
+    /// picked is at the top", which is what the user actually sees, and it holds
+    /// anywhere in the range.
+    ///
+    /// ```
+    ///   anchor header minY      relative offset      meaning
+    ///   ──────────────────      ───────────────      ───────────────────
+    ///          0                       0             at rest
+    ///        -60                     +60             dragged up  → collapsing
+    ///        +60                     -60             pulled down → expanding
+    /// ```
+    ///
+    /// When the anchor scrolls out of view entirely there is nothing to report,
+    /// so progress simply holds — which is the right behaviour: deep in the list
+    /// the calendar stays collapsed.
+    /// Turns section-header movement into collapse progress.
+    ///
+    /// The collapse needs one number: how far the list has been dragged since it
+    /// came to rest. There is no way to read that from the scroll view directly —
+    /// every absolute probe goes silent once the content scrolls away from it
+    /// (see the note in `AgendaPreferences.swift`) — so it is *accumulated* here,
+    /// frame by frame, from the only thing that keeps reporting: the headers.
+    ///
+    /// Each frame, any header that appeared in the previous frame too has moved
+    /// by exactly the distance the content moved. Taking the median across them
+    /// rejects the odd header that is appearing or being recycled at the edges.
+    ///
+    /// Headers parked at the top edge are excluded: that is the *pinned* one,
+    /// which by definition holds at zero however far the list scrolls, and would
+    /// otherwise drag the median to nothing.
+    ///
+    /// Sign follows the scroll-offset convention used by the collapse logic:
+    /// content moving up (a drag up, `minY` decreasing) is positive travel.
+    func trackListTravel(_ offsets: [AgendaHeaderOffset]) {
+        var deltas: [Double] = []
+
+        for offset in offsets where abs(offset.minY) > pinnedSlack {
+            guard let previous = previousHeaderOffsets[offset.id] else { continue }
+            deltas.append(offset.minY - previous)
+        }
+
+        previousHeaderOffsets = Dictionary(
+            offsets.map { ($0.id, $0.minY) },
+            uniquingKeysWith: { first, _ in first }
+        )
+
+        guard !deltas.isEmpty else { return }
+
+        deltas.sort()
+        let median = deltas[deltas.count / 2]
+        guard median != 0 else { return }
+
+        listTravel -= median
+        listOffsetChanged(listTravel)
+    }
+
+    /// Re-zeroes the gesture. Called wherever the list has settled somewhere new,
+    /// so the next drag is measured from where the user can actually see it
+    /// resting rather than from some earlier position.
+    private func resetListTravel() {
+        listTravel = 0
+        previousHeaderOffsets = [:]
     }
 
     /// Asks the list to bring `date`'s sticky header to the top.
@@ -432,28 +636,82 @@ final class EZCalendarAgendaViewModel: ObservableObject {
         guard sectionDates[id] != nil else { return }
 
         isDrivingList = true
-        scrollTarget = id
+        pendingScrollTarget = id
+        scrollCorrectionsRemaining = 3
+        scrollRequest = AgendaScrollRequest(id: id, animated: hasPositionedList)
+        hasPositionedList = true
+
         releaseListLatch()
     }
 
-    /// SwiftUI gives no "scroll animation finished" callback, so the list latch
-    /// is released on a timer just longer than the scroll animation. Each new
-    /// request cancels the previous timer, so a burst of selections holds the
-    /// latch until the last one settles rather than releasing early.
+    /// Nudges the list onto its target, then releases the latch.
+    ///
+    /// `scrollTo` into a `LazyVStack` of a few hundred variable-height sections
+    /// lands *approximately*: SwiftUI has to estimate the offsets of rows it has
+    /// not built yet, and the estimate drifts over a long hop. Undershooting by
+    /// even one header height is not cosmetic here — the previous day's header
+    /// stays pinned at the top, the sync reads it as the day on screen, and the
+    /// calendar ends up selecting the day *before* the one that was asked for.
+    ///
+    /// The residual is already being measured, so this re-issues the scroll now
+    /// that the target is materialised and the estimate is exact. Attempts are
+    /// capped: the latch must not be held open by a target that can never reach
+    /// the top, such as the last day in the range.
+    private func correctScroll(towards offsets: [AgendaHeaderOffset]) {
+        guard let target = pendingScrollTarget else {
+            releaseListLatchNow()
+            return
+        }
+
+        // Not built yet — keep waiting; the backstop timer covers the rest.
+        guard let landed = offsets.first(where: { $0.id == target }) else { return }
+
+        if abs(landed.minY) <= arrivalSlack {
+            releaseListLatchNow()
+            return
+        }
+
+        guard scrollCorrectionsRemaining > 0 else {
+            releaseListLatchNow()
+            return
+        }
+
+        scrollCorrectionsRemaining -= 1
+        scrollRequest = AgendaScrollRequest(id: target, animated: false)
+    }
+
+    /// Backstop only. The latch is normally released by arrival, in
+    /// `headerOffsetsChanged(_:)`; this covers the case where the target never
+    /// reports itself — a section that was removed mid-scroll, or a list too
+    /// short to bring that day to the top.
     private func releaseListLatch() {
         listSyncRelease?.cancel()
         listSyncRelease = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 450_000_000)
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
             guard !Task.isCancelled else { return }
-            self?.isDrivingList = false
+            self?.releaseListLatchNow()
         }
     }
 
-    /// Same idea for the pager: hold the latch across the scroll animation so the
-    /// page we just moved to does not report itself back as a user swipe.
-    private func withPagerLatch(_ work: () -> Void) {
+    private func releaseListLatchNow() {
+        listSyncRelease?.cancel()
+        listSyncRelease = nil
+        pendingScrollTarget = nil
+        scrollCorrectionsRemaining = 0
+        isDrivingList = false
+
+        // Wherever the list has just settled is the new zero for the gesture.
+        resetListTravel()
+    }
+
+    /// Holds the pager latch across a programmatic move, so the page we just
+    /// scrolled to does not report itself back as a user swipe.
+    ///
+    /// Unlike the list, the pager has no "arrived" signal worth waiting on — the
+    /// id we are moving to is the id it will report — so this one does stay a
+    /// timer.
+    private func holdPagerLatch() {
         isDrivingPager = true
-        work()
 
         pagerSyncRelease?.cancel()
         pagerSyncRelease = Task { [weak self] in

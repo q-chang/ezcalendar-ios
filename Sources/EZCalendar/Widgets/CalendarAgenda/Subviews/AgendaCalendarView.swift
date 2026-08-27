@@ -61,10 +61,15 @@ struct AgendaCalendarView<TitleView: View, WeekdayItemView: View, DayItemView: V
         )
     }
 
-    /// `true` once the collapse has fully settled into `.weekly`. Mid-drag the
-    /// month pager stays on screen so its rows can keep fading.
+    /// `true` once the collapse has fully settled into `.weekly`.
+    ///
+    /// All three conditions matter. `progress >= 1` covers a drag that the user
+    /// pushed to the end; `!isTransitioning` covers an animated mode change,
+    /// where `progress` reaches its target value in the model long before the
+    /// animation that shows it has finished. Without the second one, both pagers
+    /// render at once for the whole transition and visibly ghost over each other.
     private var showsWeekPager: Bool {
-        viewModel.mode == .weekly && viewModel.progress >= 1
+        viewModel.mode == .weekly && viewModel.progress >= 1 && !viewModel.isTransitioning
     }
 
     /// The clipping window that gives the calendar its height.

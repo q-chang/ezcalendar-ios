@@ -55,9 +55,6 @@ struct AgendaListView<Event: Identifiable, ListHeaderView: View, EventItemView: 
         .onPreferenceChange(AgendaHeaderOffsetKey.self) { offsets in
             viewModel.headerOffsetsChanged(offsets)
         }
-        .onPreferenceChange(AgendaListOffsetKey.self) { offset in
-            viewModel.listOffsetChanged(offset)
-        }
     }
 
     /// The caller's grab pill, with the one explicit collapse gesture in the
@@ -99,20 +96,26 @@ struct AgendaListView<Event: Identifiable, ListHeaderView: View, EventItemView: 
                         }
                     }
                 }
-                .measureListOffset()
             }
             .coordinateSpace(.named(AgendaCoordinateSpace.list))
             .scrollIndicators(.never)
-            .onChange(of: viewModel.scrollTarget) { _, target in
-                guard let target else { return }
+            .onChange(of: viewModel.scrollRequest) { _, request in
+                guard let request else { return }
 
-                withAnimation(viewModel.collapseAnimation) {
-                    proxy.scrollTo(target, anchor: .top)
+                // Deliberately *not* `collapseAnimation`: that one is the
+                // caller's, and a slow value there would leave the list still
+                // travelling long after any sync latch could reasonably wait.
+                if request.animated {
+                    withAnimation(.easeOut(duration: 0.25)) {
+                        proxy.scrollTo(request.id, anchor: .top)
+                    }
+                } else {
+                    proxy.scrollTo(request.id, anchor: .top)
                 }
 
                 // Clear the request so selecting the same day twice scrolls
                 // twice — `onChange` only fires on a *changed* value.
-                viewModel.scrollTarget = nil
+                viewModel.scrollRequest = nil
             }
         }
     }

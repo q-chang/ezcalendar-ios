@@ -10,4 +10,5 @@ import Foundation
 enum Destination: Hashable {
     case item
     case horizontal_paging
+    case agenda
 }

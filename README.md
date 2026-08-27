@@ -457,7 +457,9 @@ The suite covers `EZCalendarAgendaView`'s logic — page building, selection rul
 
 `EZCalendar.xcworkspace` contains a `Demo` scheme showing both components, with Thai/Buddhist localization, boundary-guarded navigation buttons, and simulated async event loading.
 
-> The Demo's Xcode project links a **sibling checkout** at `../../EZCalendar-Swift`, not the sources in this repository. Changes made here will not appear in the Demo until that path is repointed.
+The Demo's Swift package reference points at this repository, so it builds the sources in `Sources/EZCalendar` directly.
+
+It includes an **Agenda** screen exercising `EZCalendarAgendaView`: tap-to-select with auto-collapse, two-way scroll sync, drag-to-collapse, and manual paging.
 
 ---
 

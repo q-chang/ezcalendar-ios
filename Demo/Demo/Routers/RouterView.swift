@@ -22,6 +22,8 @@ struct RouterView: View {
                         CalendarHorizontalPagingView(
                             viewModel: .init(withCalendar: .current)
                         )
+                    case .agenda:
+                        DemoAgendaView(viewModel: .init(withCalendar: .current))
                     }
                 }
         }
