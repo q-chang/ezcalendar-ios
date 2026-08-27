@@ -13,9 +13,22 @@ swift build
 
 Fast (~7s cold), builds the library for macOS in Swift 6 language mode. **Run this after every source change.** A clean `swift build` is the baseline for calling any change done.
 
-## Building for iOS
+## Building for iOS / running the Demo
 
-The package targets iOS 17+, but `swift build` only exercises the macOS slice. To confirm an iOS build, use the Demo app instead of the package scheme:
+The package targets iOS 17+, but `swift build` only exercises the macOS slice. To
+confirm an iOS build, or to see a change on screen, use the Demo runner:
+
+```bash
+scripts/demo/run-demo.sh              # build, boot a simulator, install, launch
+scripts/demo/run-demo.sh --build-only # compile only, no simulator
+scripts/demo/run-demo.sh --console    # stream the app's stdout/stderr
+scripts/demo/run-demo.sh --list       # available devices
+```
+
+With no `-d/--device` it picks the newest available iPhone. Derived data goes to
+`.build/demo-dd`, which is gitignored.
+
+The equivalent raw invocation, if you need to vary something the script doesn't expose:
 
 ```bash
 xcodebuild -workspace EZCalendar.xcworkspace -scheme Demo \
@@ -23,7 +36,7 @@ xcodebuild -workspace EZCalendar.xcworkspace -scheme Demo \
   build
 ```
 
-This takes a few minutes. Add `-derivedDataPath <scratchpad>/dd` to keep artifacts out of the user's DerivedData.
+Either way it takes a few minutes on a cold build.
 
 > ⚠️ **The Demo builds against a sibling checkout, not this repo.** `Demo/Demo.xcodeproj` has an `XCLocalSwiftPackageReference` with `relativePath = "../../EZCalendar-Swift"` — a *different* clone (remote `wisanu-dev/EZCalendar-Swift`) that is behind this one. A green Demo build does **not** validate your changes to `Sources/EZCalendar`. Either repoint that reference, or rely on `swift build` plus a temporary test target (see the `verify-calendar-grid` skill).
 
