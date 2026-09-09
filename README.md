@@ -4,6 +4,38 @@
 
 There are no built-in colors, fonts, or cell designs. That is the point.
 
+<table>
+  <tr>
+    <td align="center" width="25%">
+      <img src="docs/assets/day-items-demo.png" width="200" alt="Three month grids stacked in a scroll view, rendered as plain day numbers with adjacent-month days dimmed">
+    </td>
+    <td align="center" width="25%">
+      <img src="docs/assets/horizontal-paging-demo.png" width="200" alt="A single swipeable month with Previous and Next buttons and a red weekday header">
+    </td>
+    <td align="center" width="25%">
+      <img src="docs/assets/agenda-monthly-demo.png" width="200" alt="A full month grid with event dots, above a date-grouped event list with sticky headers">
+    </td>
+    <td align="center" width="25%">
+      <img src="docs/assets/agenda-weekly-demo.png" width="200" alt="The same calendar collapsed to a single week, with the event list taking the freed height">
+    </td>
+  </tr>
+  <tr>
+    <td align="center"><code>EZCalendarItemView</code></td>
+    <td align="center"><code>EZCalendarHorizontalPagingView</code></td>
+    <td align="center" colspan="2"><code>EZCalendarAgendaView</code></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>One month as a grid</sub></td>
+    <td align="center"><sub>Swipe between months</sub></td>
+    <td align="center"><sub><code>.monthly</code></sub></td>
+    <td align="center"><sub><code>.weekly</code></sub></td>
+  </tr>
+</table>
+
+The last two are the same day, before and after the collapse: drag the handle and the month closes onto its selected week, handing the freed height to the list.
+
+> Every pixel above comes from the Demo app's own `@ViewBuilder` closures — the red weekday letters, the event dots, the card styling. The library supplied only the dates and the layout.
+
 ---
 
 ## ⚙️ Requirements
@@ -60,6 +92,7 @@ EZCalendarItemView                      ← LazyVGrid, one month
         │
         ▼
 EZCalendarHorizontalPagingView          ← swipeable strip of months + weekday header
+EZCalendarAgendaView                    ← collapsible calendar + synced event list
 ```
 
 The grid logic is deliberately separated from rendering, so `EZCalendarItemView` composes into a vertical `ScrollView`, a `TabView`, or anything else just as easily as into the built-in pager.
@@ -226,6 +259,12 @@ public static func generateCalendarMonths(
 
 One month as a 7-column `LazyVGrid`.
 
+<p align="center">
+  <img src="docs/assets/day-items-demo.png" width="240" alt="Three month grids stacked vertically, each showing plain day numbers with adjacent-month padding days dimmed">
+  <br>
+  <sub>Three of them stacked in a <code>ScrollView</code>. Cells are unstyled <code>Text</code>; padding days are dimmed by the caller reading <code>isCurrentMonth</code>.</sub>
+</p>
+
 ```swift
 public init(
     _ calendarMonth: CalendarMonth,
@@ -243,6 +282,12 @@ Rows are 5 or 6 depending on the month; every row always has 7 cells. Grid spaci
 ### `EZCalendarHorizontalPagingView`
 
 A horizontally paged strip of months, snapped with `.scrollTargetBehavior(.viewAligned)`.
+
+<p align="center">
+  <img src="docs/assets/horizontal-paging-demo.png" width="240" alt="August 2026 with Previous and Next buttons above a red weekday header and a month grid">
+  <br>
+  <sub>The weekday header scrolls with each page here (<code>.weekdayScrollable(true)</code>). Previous/Next drive the <code>currentMonth</code> binding.</sub>
+</p>
 
 ```swift
 public init(
@@ -268,6 +313,98 @@ public init(
 | --- | --- | --- |
 | `.gridLineColor(_ color: Color?)` | `nil` | Sets a 1pt background behind the grid so gaps read as separators. `nil` is a no-op. |
 | `.weekdayScrollable(_ flag: Bool)` | `false` | `false` pins one header above the pager; `true` gives every month its own header that scrolls with it. |
+
+---
+
+### `EZCalendarAgendaView`
+
+A collapsible calendar stacked on a continuous, date-grouped event list, kept in sync in both directions.
+
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <img src="docs/assets/agenda-monthly-demo.png" width="240" alt="August 2026 grid with blue event dots and today circled, above a list grouped by date with sticky headers and event cards">
+    </td>
+    <td align="center" width="50%">
+      <img src="docs/assets/agenda-weekly-demo.png" width="240" alt="The same view collapsed to the week of 23 to 29 August, the event list now filling most of the screen">
+    </td>
+  </tr>
+  <tr>
+    <td align="center"><code>.monthly</code></td>
+    <td align="center"><code>.weekly</code></td>
+  </tr>
+</table>
+
+<sub>The same selected day (27 August) either side of the collapse — only the calendar's height changes, and the list keeps its position. Dots mark days with events, including the dimmed adjacent-month days. The pill under the grid is the drag handle.</sub>
+
+The slots, and who fills them:
+
+```
+┌─────────────────────────────┐
+│  ‹   July 2569   ›          │  titleViewContent
+│  Su Mo Tu We Th Fr Sa       │  weekdayItemViewContent
+│  30  1  2 [3] 4  5  6       │  dayItemViewContent
+│   7  8  9 10 11 12 13       │  … collapses to a single week
+├─────────────────────────────┤
+│            ▭                │  handleViewContent
+│  Wednesday, 3 July 2569     │  listHeaderViewContent  (sticky)
+│    09:00  Install job       │  eventItemViewContent
+└─────────────────────────────┘
+```
+
+```swift
+@State private var mode: EZCalendarAgendaMode = .monthly
+@State private var selectedDate = Date()
+@State private var months: [CalendarMonth] = []
+
+EZCalendarAgendaView(
+    withCalendar: calendar,
+    mode: $mode,
+    selectedDate: $selectedDate,
+    calendarMonths: $months,
+    events: jobs,                     // your own Identifiable type
+    eventDate: { $0.scheduledAt },    // which day each event belongs to
+    weekdayItemViewContent: { Text($0).frame(maxWidth: .infinity) },
+    dayItemViewContent: { context in
+        DayCell(context)              // .isSelected, .isToday, .hasEvents
+    },
+    listHeaderViewContent: { section in
+        Text(headerFormatter.string(from: section.date))
+    },
+    eventItemViewContent: { job in
+        JobRow(job)
+    }
+)
+.gridLineColor(.secondary.opacity(0.1))
+```
+
+The longer initializer adds `titleViewContent`, `emptyDayViewContent` and `handleViewContent`.
+
+**Behavior**
+
+| Interaction | Result |
+| --- | --- |
+| Tap a day | The list scrolls that day's sticky header to the top. In `.monthly` the tap also snaps the calendar to `.weekly`. |
+| Scroll the list | Whichever sticky header is pinned at the top becomes the selected day; the calendar pages itself to follow. |
+| Drag the grab handle | The calendar tracks the finger, non-selected weeks fading as the grid closes. On release it commits if the drag passed `collapseThreshold` **or** was flicked faster than `collapseVelocityThreshold`, and springs back otherwise. |
+| Scroll the event list | Scrolls the list. It never changes the mode, in either direction, over-scroll included. |
+| Swipe the calendar in `.monthly` | Selects the 1st of the new month — or today, if today falls in it. |
+| Swipe the calendar in `.weekly` | Selects the week's first day — or today, if today falls in that week. |
+
+Page it programmatically with `EZCalendarAgendaPaging.selection(paging:from:mode:calendarMonths:calendar:)`, or from your own title bar with the `pageForward()` / `pageBackward()` closures on `EZCalendarAgendaTitleContext`.
+
+**Modifiers**
+
+| Modifier | Default | Effect |
+| --- | --- | --- |
+| `.gridLineColor(_:)` | `nil` | Colour showing through the grid's 1pt gaps. |
+| `.collapseThreshold(_:)` | `78` | How far the grab handle must be dragged, on release, to commit a switch. |
+| `.collapseVelocityThreshold(_:)` | `350` | How fast it must be flicked (points/second) to commit regardless of distance. `0` disables the flick. |
+| `.collapseAnimation(_:)` | `.easeOut(duration: 0.3)` | How a released gesture settles. |
+
+> **Use `context.hasEvents`, not `context.day.hasEvents`.** The agenda buckets your events by *day*, so its flag works for events stamped at a real time and for padding days — neither of which `CalendarDay.hasEvents` handles. See limitation 2 below.
+
+> `selectedDate` is normalised to the start of its day in the view's calendar. Events outside `calendarMonths` still appear in the list, which spans the months unioned with your event dates.
 
 ---
 
@@ -361,7 +498,7 @@ These are current, verified behaviors — worth knowing before you build around 
 | # | Behavior | Impact |
 | --- | --- | --- |
 | 1 | **`calendar.firstWeekday` is ignored.** The grid and the header are always Sunday-first, regardless of the calendar's setting. | Monday-first regions (most of Europe) get a Sunday-first grid. |
-| 2 | **Padding days never carry events.** `hasEvents` is only computed for days inside the month; leading/trailing cells are always `false`. | An event on a visible adjacent-month cell shows no indicator. |
+| 2 | **Padding days never carry events.** `hasEvents` is only computed for days inside the month; leading/trailing cells are always `false`. | An event on a visible adjacent-month cell shows no indicator. `EZCalendarAgendaView` is exempt — its `EZCalendarDayContext.hasEvents` is computed separately. |
 | 3 | **`generateCalendarMonths(events:)` is ignored.** The argument is accepted but never written into the returned months. | Attach events by replacing elements of `calendarMonths` instead. |
 | 4 | **`CalendarMonth.hashString` changes when `events` change.** It is the pager's scroll-position identity. | Injecting events into the visible month can disturb scroll position. Prefer loading events for a month before it scrolls into view. |
 | 5 | **`EZCalendarItemView.gridLineColor(_:)` is internal.** | Not callable outside the package. Only the pager exposes it publicly. |
@@ -371,11 +508,23 @@ These are current, verified behaviors — worth knowing before you build around 
 
 ---
 
+## ✅ Tests
+
+```bash
+swift test
+```
+
+The suite covers `EZCalendarAgendaView`'s logic — page building, selection rules, event bucketing, the two-way sync, and the collapse geometry. The month-grid date math in `EZCalendarItemViewModel` remains untested; verify changes to it by dumping grids (see `docs/agent-knowledge/building-and-verifying.md`).
+
+---
+
 ## 🧪 Demo app
 
 `EZCalendar.xcworkspace` contains a `Demo` scheme showing both components, with Thai/Buddhist localization, boundary-guarded navigation buttons, and simulated async event loading.
 
-> The Demo's Xcode project links a **sibling checkout** at `../../EZCalendar-Swift`, not the sources in this repository. Changes made here will not appear in the Demo until that path is repointed.
+The Demo's Swift package reference points at this repository, so it builds the sources in `Sources/EZCalendar` directly.
+
+It includes an **Agenda** screen exercising `EZCalendarAgendaView`: tap-to-select with auto-collapse, two-way scroll sync, handle-drag collapse, and manual paging.
 
 ---
 

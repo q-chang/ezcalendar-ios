@@ -50,9 +50,9 @@ ENVIRONMENT
     EZ_DEMO_DEVICE          Default device name.
 
 NOTE
-    The Demo's Xcode project links a *sibling checkout* at ../../EZCalendar-Swift,
-    not this repository's Sources/. Changes made here will not appear in the app
-    until that package reference is repointed. See AGENTS.md, landmine #1.
+    The Demo builds this repository's Sources/ — its Swift package reference
+    points at the repo root. It did once link a sibling checkout; that was
+    repointed, so a green Demo build now does validate your library changes.
 EOF
 }
 
@@ -131,8 +131,6 @@ for entries in json.load(sys.stdin)["devices"].values():
 ' "$UDID")"
 
 info "Simulator: $DEVICE_NAME ($UDID)"
-
-warn "the Demo links ../../EZCalendar-Swift, not this repo's Sources/ (AGENTS.md #1)"
 
 # ---------------------------------------------------------------------------
 # Build

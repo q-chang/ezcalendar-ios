@@ -47,4 +47,4 @@ before pushing the tag**, and never push a tag as a side effect of another task.
 
 - **Raising a platform floor is a major bump.** `Package.swift` currently declares `.iOS(.v17)` / `.macOS(.v15)`.
 - **Making an internal member public is a minor bump, not a patch.** Several types in this package are `public` with internal members (see AGENTS.md) — widening any of them is new API.
-- **The sibling `EZCalendar-Swift` repo is separate.** It has its own remote and its own tags. Releasing here does not release that one, and vice versa.
+- **The sibling `EZCalendar-Swift` repo is separate.** It has its own remote and its own tags. Releasing here does not release that one, and vice versa. (The Demo no longer links it.)

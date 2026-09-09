@@ -20,6 +20,9 @@ as an external module — not by reading modifiers.
 | `EZCalendarItemView.gridLineColor(_:)` | ❌ **internal** |
 | `EZCalendarWeekdayHeaderView` | ⚠️ type public, **`init` internal** |
 | `EZCalendarHorizontalPagingView` + `init` + `.gridLineColor` + `.weekdayScrollable` | ✅ |
+| `EZCalendarAgendaView` + both `init`s + `.gridLineColor` + `.collapseThreshold` + `.collapseAnimation` | ✅ |
+| `EZCalendarAgendaMode`, `EZCalendarAgendaPaging` | ✅ |
+| `EZCalendarDayContext`, `EZCalendarAgendaSection`, `EZCalendarAgendaTitleContext` | ✅ read only — received, never constructed |
 | `Date` extension (`.from`, `.get`, `.startOfMonth`, `.toString`) | ❌ **internal** |
 
 ## The three that bite
@@ -104,6 +107,26 @@ A `class`, not a struct — reference semantics. Identity is `uuid` + `eventDate
 
 Always exactly 7 `CalendarDay`s. Carries a `uuid` regenerated on every `init`, so
 two structurally identical weeks are never `==`.
+
+## The agenda's surface
+
+`EZCalendarAgendaView` was verified the same way — a scratch package importing
+`EZCalendar` as an external module, compiling both initializers, all three
+modifiers, `EZCalendarAgendaPaging`, and every `@ViewBuilder` slot, for macOS and
+for `generic/platform=iOS Simulator`.
+
+Three of its public types are **received, never constructed**, in the same spirit
+as `CalendarDay`: their initializers are internal on purpose.
+
+| Type | Where a consumer meets it |
+| --- | --- |
+| `EZCalendarDayContext` | the `dayItemViewContent` closure |
+| `EZCalendarAgendaSection<Event>` | the `listHeaderViewContent` closure |
+| `EZCalendarAgendaTitleContext` | the `titleViewContent` closure |
+
+Note that `EZCalendarAgendaView` never needs the internal `Date` extension in a
+caller's code: `EZCalendarDayContext.date` is a plain `Date?`, and the README
+example reads the day number through `Calendar.component(_:from:)`.
 
 ## Changing access levels
 
