@@ -106,18 +106,20 @@ struct AgendaViewModelTests {
 
     // MARK: - Collapsing by dragging the handle
     //
-    // Unmeasured, `interactiveTravel` falls back to the commit threshold, so in
-    // these tests one point of drag is one hundredth of the collapse.
+    // Unmeasured, `interactiveTravel` falls back to the commit threshold — 78pt —
+    // so in these tests a 78pt drag is a full collapse. `velocity: 0` keeps each
+    // release a slow drag, so only the distance rule can fire; the flick rule
+    // has its own suite below.
 
     @Test("The calendar follows the finger while the handle is held")
     func dragTracksTheFinger() {
         let viewModel = makeViewModel(mode: .monthly)
 
-        viewModel.handleDragChanged(translation: -25)
+        viewModel.handleDragChanged(translation: -19.5)
         #expect(abs(viewModel.progress - 0.25) < 0.000_001)
 
-        viewModel.handleDragChanged(translation: -60)
-        #expect(abs(viewModel.progress - 0.6) < 0.000_001)
+        viewModel.handleDragChanged(translation: -39)
+        #expect(abs(viewModel.progress - 0.5) < 0.000_001)
 
         // Following the finger is a preview; nothing is decided yet.
         #expect(viewModel.mode == .monthly)
@@ -138,7 +140,7 @@ struct AgendaViewModelTests {
         let viewModel = makeViewModel(mode: .monthly)
 
         viewModel.handleDragChanged(translation: -120)
-        viewModel.handleDragEnded(translation: -120)
+        viewModel.handleDragEnded(translation: -120, velocity: 0)
 
         #expect(viewModel.mode == .weekly)
     }
@@ -147,10 +149,10 @@ struct AgendaViewModelTests {
     func releaseShortSpringsBack() {
         let viewModel = makeViewModel(mode: .monthly)
 
-        viewModel.handleDragChanged(translation: -70)
-        #expect(abs(viewModel.progress - 0.7) < 0.000_001)
+        viewModel.handleDragChanged(translation: -60)
+        #expect(abs(viewModel.progress - (60.0 / 78.0)) < 0.000_001)
 
-        viewModel.handleDragEnded(translation: -70)
+        viewModel.handleDragEnded(translation: -60, velocity: 0)
 
         #expect(viewModel.mode == .monthly)
         #expect(viewModel.progress == 0)
@@ -160,15 +162,15 @@ struct AgendaViewModelTests {
     func dragDownExpands() {
         let viewModel = makeViewModel(mode: .weekly)
 
-        viewModel.handleDragChanged(translation: 40)
-        #expect(abs(viewModel.progress - 0.6) < 0.000_001)
+        viewModel.handleDragChanged(translation: 39)
+        #expect(abs(viewModel.progress - 0.5) < 0.000_001)
 
-        viewModel.handleDragEnded(translation: 40)
+        viewModel.handleDragEnded(translation: 39, velocity: 0)
         #expect(viewModel.mode == .weekly)
         #expect(viewModel.progress == 1)
 
         viewModel.handleDragChanged(translation: 130)
-        viewModel.handleDragEnded(translation: 130)
+        viewModel.handleDragEnded(translation: 130, velocity: 0)
         #expect(viewModel.mode == .monthly)
     }
 
@@ -179,7 +181,7 @@ struct AgendaViewModelTests {
         viewModel.handleDragChanged(translation: 200)
         #expect(viewModel.progress == 0)
 
-        viewModel.handleDragEnded(translation: 200)
+        viewModel.handleDragEnded(translation: 200, velocity: 0)
         #expect(viewModel.mode == .monthly)
     }
 
@@ -192,8 +194,8 @@ struct AgendaViewModelTests {
         #expect(viewModel.progress == 1)
 
         // …then the user changes their mind and comes back before lifting.
-        viewModel.handleDragChanged(translation: -20)
-        viewModel.handleDragEnded(translation: -20)
+        viewModel.handleDragChanged(translation: -15)
+        viewModel.handleDragEnded(translation: -15, velocity: 0)
 
         #expect(viewModel.mode == .monthly)
         #expect(viewModel.progress == 0)
@@ -232,12 +234,12 @@ struct AgendaViewModelTests {
         let rows = Double(page.weeks.count)
         viewModel.gridHeights[page.id] = rows * 50 + (rows - 1)
 
-        // 110pt closes the calendar only partway…
-        viewModel.handleDragChanged(translation: -110)
+        // 90pt closes the calendar only partway…
+        viewModel.handleDragChanged(translation: -90)
         #expect(viewModel.progress < 0.6)
 
         // …but it clears the commit threshold, so the rest is animated.
-        viewModel.handleDragEnded(translation: -110)
+        viewModel.handleDragEnded(translation: -90, velocity: 0)
         #expect(viewModel.mode == .weekly)
     }
 
@@ -246,10 +248,10 @@ struct AgendaViewModelTests {
         let viewModel = makeViewModel(mode: .monthly)
         viewModel.collapseThreshold = 250
 
-        viewModel.handleDragEnded(translation: -140)
+        viewModel.handleDragEnded(translation: -140, velocity: 0)
         #expect(viewModel.mode == .monthly)
 
-        viewModel.handleDragEnded(translation: -260)
+        viewModel.handleDragEnded(translation: -260, velocity: 0)
         #expect(viewModel.mode == .weekly)
     }
 
@@ -681,5 +683,72 @@ struct AgendaPagerFreshnessTests {
 
         let page = viewModel.weekPages.first { $0.id == viewModel.visibleWeekID }
         #expect(page?.days.contains { $0.date == Fixture.date(2030, 8, 19) } == true)
+    }
+}
+
+/// The flick path end to end through the view model, at the shipped defaults.
+@Suite("Agenda flick to switch")
+@MainActor
+struct AgendaFlickTests {
+
+    let calendar = Fixture.gregorian
+
+    func makeViewModel(mode: EZCalendarAgendaMode) -> EZCalendarAgendaViewModel {
+        let selection = Fixture.date(2030, 7, 10)
+        let viewModel = EZCalendarAgendaViewModel(calendar: calendar, mode: mode, selection: selection)
+        viewModel.rebuildPages(from: Fixture.months([(7, 2030)]))
+        viewModel.primePagers(for: selection)
+        return viewModel
+    }
+
+    @Test("The shipped defaults match the specification")
+    func defaultsMatchTheSpec() {
+        let viewModel = makeViewModel(mode: .monthly)
+
+        #expect(viewModel.collapseThreshold == 78)
+        #expect(viewModel.collapseVelocityThreshold == 350)
+    }
+
+    @Test("A short fast flick up collapses")
+    func flickUpCollapses() {
+        let viewModel = makeViewModel(mode: .monthly)
+
+        viewModel.handleDragChanged(translation: -18)
+        viewModel.handleDragEnded(translation: -18, velocity: -700)
+
+        #expect(viewModel.mode == .weekly)
+    }
+
+    @Test("A short fast flick down expands")
+    func flickDownExpands() {
+        let viewModel = makeViewModel(mode: .weekly)
+
+        viewModel.handleDragChanged(translation: 18)
+        viewModel.handleDragEnded(translation: 18, velocity: 700)
+
+        #expect(viewModel.mode == .monthly)
+    }
+
+    @Test("The same short drag, released slowly, springs back instead")
+    func sameDistanceSlowSpringsBack() {
+        let viewModel = makeViewModel(mode: .monthly)
+
+        viewModel.handleDragChanged(translation: -18)
+        viewModel.handleDragEnded(translation: -18, velocity: -60)
+
+        #expect(viewModel.mode == .monthly)
+        #expect(viewModel.progress == 0)
+    }
+
+    @Test("Disabling the flick cutoff leaves distance alone in charge")
+    func flickCanBeDisabled() {
+        let viewModel = makeViewModel(mode: .monthly)
+        viewModel.collapseVelocityThreshold = 0
+
+        viewModel.handleDragEnded(translation: -18, velocity: -3000)
+        #expect(viewModel.mode == .monthly)
+
+        viewModel.handleDragEnded(translation: -90, velocity: 0)
+        #expect(viewModel.mode == .weekly)
     }
 }

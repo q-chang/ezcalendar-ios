@@ -52,11 +52,16 @@ final class EZCalendarAgendaViewModel: ObservableObject {
 
     /// How far the grab handle must be dragged, on release, to commit a switch.
     /// Caller-tunable through `.collapseThreshold(_:)`.
-    var collapseThreshold: Double = 100
+    var collapseThreshold: Double = 78
+
+    /// How fast the handle must be flicked, in points per second, to commit a
+    /// switch regardless of distance.
+    /// Caller-tunable through `.collapseVelocityThreshold(_:)`.
+    var collapseVelocityThreshold: Double = 350
 
     /// Animation used when a gesture settles or `mode` changes programmatically.
     /// Caller-tunable through `.collapseAnimation(_:)`.
-    var collapseAnimation: Animation = .snappy(duration: 0.28)
+    var collapseAnimation: Animation = .easeOut(duration: 0.3)
 
     /// The inter-row gap of the grid. Matches `EZCalendarItemView`'s fixed 1pt
     /// `LazyVGrid` spacing — the library's one deliberate styling exception,
@@ -352,12 +357,15 @@ final class EZCalendarAgendaViewModel: ObservableObject {
         )
     }
 
-    /// Released handle drag: commit past the threshold, otherwise spring back.
-    func handleDragEnded(translation: Double) {
+    /// Released handle drag: commit past the distance threshold *or* on a fast
+    /// enough flick, otherwise spring back.
+    func handleDragEnded(translation: Double, velocity: Double) {
         let resolved = EZCalendarAgendaLogic.mode(
             forHandleTranslation: translation,
+            velocity: velocity,
             from: mode,
-            threshold: collapseThreshold
+            threshold: collapseThreshold,
+            velocityThreshold: collapseVelocityThreshold
         )
 
         if resolved != mode {

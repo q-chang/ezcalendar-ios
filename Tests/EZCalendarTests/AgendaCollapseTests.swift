@@ -19,6 +19,9 @@ struct AgendaCollapseTests {
     /// Roughly a six-row month of 50pt rows: what the grid can actually lose.
     let travel: Double = 255
 
+    /// The flick cutoff, in points per second.
+    let flickVelocity: Double = 350
+
     @Test(
         "Collapse progress follows the drag proportionally out of .monthly",
         arguments: [
@@ -101,8 +104,10 @@ struct AgendaCollapseTests {
     func handleDragCollapsesAtThreshold(translation: Double, expected: EZCalendarAgendaMode) {
         let result = EZCalendarAgendaLogic.mode(
             forHandleTranslation: translation,
+            velocity: 0,
             from: .monthly,
-            threshold: threshold
+            threshold: threshold,
+            velocityThreshold: flickVelocity
         )
 
         #expect(result == expected)
@@ -121,8 +126,10 @@ struct AgendaCollapseTests {
     func handleDragExpandsAtThreshold(translation: Double, expected: EZCalendarAgendaMode) {
         let result = EZCalendarAgendaLogic.mode(
             forHandleTranslation: translation,
+            velocity: 0,
             from: .weekly,
-            threshold: threshold
+            threshold: threshold,
+            velocityThreshold: flickVelocity
         )
 
         #expect(result == expected)
@@ -130,22 +137,68 @@ struct AgendaCollapseTests {
 
     @Test("Releasing a wrong-way drag never commits, however far it went")
     func wrongWayDragsAreInert() {
-        #expect(EZCalendarAgendaLogic.mode(forHandleTranslation: 400, from: .monthly, threshold: threshold) == .monthly)
-        #expect(EZCalendarAgendaLogic.mode(forHandleTranslation: -400, from: .weekly, threshold: threshold) == .weekly)
+        #expect(EZCalendarAgendaLogic.mode(
+            forHandleTranslation: 400,
+            velocity: 0,
+            from: .monthly,
+            threshold: threshold,
+            velocityThreshold: flickVelocity
+        ) == .monthly)
+        #expect(EZCalendarAgendaLogic.mode(
+            forHandleTranslation: -400,
+            velocity: 0,
+            from: .weekly,
+            threshold: threshold,
+            velocityThreshold: flickVelocity
+        ) == .weekly)
     }
 
     @Test("A custom threshold moves the switching point")
     func thresholdIsHonoured() {
         // Half the distance is enough…
-        #expect(EZCalendarAgendaLogic.mode(forHandleTranslation: -50, from: .monthly, threshold: 50) == .weekly)
+        #expect(EZCalendarAgendaLogic.mode(
+            forHandleTranslation: -50,
+            velocity: 0,
+            from: .monthly,
+            threshold: 50,
+            velocityThreshold: flickVelocity
+        ) == .weekly)
         // …and twice the distance is not.
-        #expect(EZCalendarAgendaLogic.mode(forHandleTranslation: -50, from: .monthly, threshold: 200) == .monthly)
+        #expect(EZCalendarAgendaLogic.mode(
+            forHandleTranslation: -50,
+            velocity: 0,
+            from: .monthly,
+            threshold: 200,
+            velocityThreshold: flickVelocity
+        ) == .monthly)
     }
 
     @Test("A zero or negative threshold cannot switch modes by accident")
     func degenerateThresholdHoldsTheMode() {
-        #expect(EZCalendarAgendaLogic.mode(forHandleTranslation: -500, from: .monthly, threshold: 0) == .monthly)
-        #expect(EZCalendarAgendaLogic.mode(forHandleTranslation: 500, from: .weekly, threshold: -10) == .weekly)
+        #expect(EZCalendarAgendaLogic.mode(
+            forHandleTranslation: -500,
+            velocity: 0,
+            from: .monthly,
+            threshold: 0,
+            velocityThreshold: flickVelocity
+        ) == .monthly)
+        #expect(EZCalendarAgendaLogic.mode(
+            forHandleTranslation: 500,
+            velocity: 0,
+            from: .weekly,
+            threshold: -10,
+            velocityThreshold: flickVelocity
+        ) == .weekly)
+
+        // A zero velocity cutoff disables the flick path, leaving distance alone
+        // in charge — however hard the handle is thrown.
+        #expect(EZCalendarAgendaLogic.mode(
+            forHandleTranslation: -10,
+            velocity: -5000,
+            from: .monthly,
+            threshold: 78,
+            velocityThreshold: 0
+        ) == .monthly)
     }
 
     @Test("A mode's resting progress is its own end of the range")
@@ -217,4 +270,93 @@ struct AgendaCollapseTests {
         #expect(EZCalendarAgendaLogic.rowOpacity(rowIndex: 4, selectedRowIndex: selected, progress: 1) == 0)
     }
 
+}
+
+/// The snap rules as specified: 78pt of drag, or a fast enough flick regardless
+/// of distance, decided on release.
+@Suite("Agenda snap specification")
+struct AgendaSnapSpecTests {
+
+    let threshold: Double = 78
+    let flick: Double = 350
+
+    func resolve(_ translation: Double, _ velocity: Double, from mode: EZCalendarAgendaMode) -> EZCalendarAgendaMode {
+        EZCalendarAgendaLogic.mode(
+            forHandleTranslation: translation,
+            velocity: velocity,
+            from: mode,
+            threshold: threshold,
+            velocityThreshold: flick
+        )
+    }
+
+    // MARK: Month → Week
+
+    @Test("Dragging up past 78pt switches to week")
+    func dragUpPastThreshold() {
+        #expect(resolve(-78, 0, from: .monthly) == .weekly)
+        #expect(resolve(-200, 0, from: .monthly) == .weekly)
+    }
+
+    @Test("Dragging up short of 78pt springs back to month")
+    func dragUpShortOfThreshold() {
+        #expect(resolve(-77, 0, from: .monthly) == .monthly)
+        #expect(resolve(-40, 0, from: .monthly) == .monthly)
+        #expect(resolve(0, 0, from: .monthly) == .monthly)
+    }
+
+    @Test("A fast upward flick switches to week even well short of 78pt")
+    func flickUpBeatsTheDistance() {
+        // 20pt of travel — a quarter of the threshold — but thrown hard.
+        #expect(resolve(-20, -600, from: .monthly) == .weekly)
+        #expect(resolve(-5, -350, from: .monthly) == .weekly)
+    }
+
+    @Test("A slow short drag up is not a flick")
+    func slowShortDragUpDoesNotSwitch() {
+        #expect(resolve(-20, -349, from: .monthly) == .monthly)
+        #expect(resolve(-20, -50, from: .monthly) == .monthly)
+    }
+
+    // MARK: Week → Month
+
+    @Test("Dragging down past 78pt switches to month")
+    func dragDownPastThreshold() {
+        #expect(resolve(78, 0, from: .weekly) == .monthly)
+        #expect(resolve(240, 0, from: .weekly) == .monthly)
+    }
+
+    @Test("Dragging down short of 78pt springs back to week")
+    func dragDownShortOfThreshold() {
+        #expect(resolve(77, 0, from: .weekly) == .weekly)
+        #expect(resolve(30, 0, from: .weekly) == .weekly)
+    }
+
+    @Test("A fast downward flick switches to month even well short of 78pt")
+    func flickDownBeatsTheDistance() {
+        #expect(resolve(20, 600, from: .weekly) == .monthly)
+        #expect(resolve(5, 350, from: .weekly) == .monthly)
+    }
+
+    @Test("A slow short drag down is not a flick")
+    func slowShortDragDownDoesNotSwitch() {
+        #expect(resolve(20, 349, from: .weekly) == .weekly)
+    }
+
+    // MARK: Direction
+
+    @Test("A fast flick the wrong way never switches")
+    func wrongWayFlickIsInert() {
+        // Already expanded: throwing the handle further down does nothing.
+        #expect(resolve(200, 900, from: .monthly) == .monthly)
+        // Already collapsed: throwing it further up does nothing.
+        #expect(resolve(-200, -900, from: .weekly) == .weekly)
+    }
+
+    @Test("Speed only ever adds a way to commit, it never vetoes distance")
+    func velocityNeverVetoes() {
+        // Dragged well past the threshold, then eased to a stop before lifting.
+        #expect(resolve(-150, 0, from: .monthly) == .weekly)
+        #expect(resolve(150, 0, from: .weekly) == .monthly)
+    }
 }

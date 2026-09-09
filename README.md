@@ -386,7 +386,7 @@ The longer initializer adds `titleViewContent`, `emptyDayViewContent` and `handl
 | --- | --- |
 | Tap a day | The list scrolls that day's sticky header to the top. In `.monthly` the tap also snaps the calendar to `.weekly`. |
 | Scroll the list | Whichever sticky header is pinned at the top becomes the selected day; the calendar pages itself to follow. |
-| Drag the grab handle | The calendar tracks the finger, non-selected weeks fading as the grid closes. On release it commits if the drag passed `collapseThreshold`, and springs back otherwise. |
+| Drag the grab handle | The calendar tracks the finger, non-selected weeks fading as the grid closes. On release it commits if the drag passed `collapseThreshold` **or** was flicked faster than `collapseVelocityThreshold`, and springs back otherwise. |
 | Scroll the event list | Scrolls the list. It never changes the mode, in either direction, over-scroll included. |
 | Swipe the calendar in `.monthly` | Selects the 1st of the new month — or today, if today falls in it. |
 | Swipe the calendar in `.weekly` | Selects the week's first day — or today, if today falls in that week. |
@@ -398,8 +398,9 @@ Page it programmatically with `EZCalendarAgendaPaging.selection(paging:from:mode
 | Modifier | Default | Effect |
 | --- | --- | --- |
 | `.gridLineColor(_:)` | `nil` | Colour showing through the grid's 1pt gaps. |
-| `.collapseThreshold(_:)` | `100` | How far the grab handle must be dragged, on release, to commit a switch. |
-| `.collapseAnimation(_:)` | `.snappy(duration: 0.28)` | How a released gesture settles. |
+| `.collapseThreshold(_:)` | `78` | How far the grab handle must be dragged, on release, to commit a switch. |
+| `.collapseVelocityThreshold(_:)` | `350` | How fast it must be flicked (points/second) to commit regardless of distance. `0` disables the flick. |
+| `.collapseAnimation(_:)` | `.easeOut(duration: 0.3)` | How a released gesture settles. |
 
 > **Use `context.hasEvents`, not `context.day.hasEvents`.** The agenda buckets your events by *day*, so its flag works for events stamped at a real time and for padding days — neither of which `CalendarDay.hasEvents` handles. See limitation 2 below.
 

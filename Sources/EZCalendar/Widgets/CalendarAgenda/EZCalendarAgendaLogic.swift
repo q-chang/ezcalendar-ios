@@ -42,7 +42,7 @@ struct AgendaEventIndex<Event> {
  | Pages | `monthPages`, `weekPages` — the horizontal page sets |
  | Selection rules | `selection(forMonthPage:)`, `selection(forWeekPage:)` |
  | Two-way sync | `topMostSectionID`, `index(of:)`, `eventIndex` |
- | Collapse gesture | `progress(forHandleTranslation:)` while dragging, `mode(forHandleTranslation:)` on release |
+ | Collapse gesture | `progress(forHandleTranslation:)` while dragging, `mode(forHandleTranslation:velocity:)` on release |
  | Collapse geometry | `gridHeight`, `gridOffset`, `rowOpacity`, `rowHeight` |
 
  ## ⚠️ Two deliberate deviations from `Date+.swift`
@@ -398,37 +398,51 @@ enum EZCalendarAgendaLogic {
         }
     }
 
-    /// Whether a drag on the grab handle has gone far enough to switch modes.
+    /// Whether a released drag on the grab handle switches modes.
     ///
-    /// `translation` is `DragGesture.Value.translation.height`, measured from
-    /// where the finger went down: negative upward.
+    /// Two independent ways to commit, either one is enough:
     ///
     /// ```
-    ///   .monthly  +  drag up   ≥ threshold  →  .weekly
-    ///   .weekly   +  drag down ≥ threshold  →  .monthly
-    ///   anything else                       →  unchanged
+    ///   .monthly   dragged up   ≥ threshold          →  .weekly
+    ///   .monthly   flicked up   ≥ velocityThreshold  →  .weekly   (however short)
+    ///   .weekly    dragged down ≥ threshold          →  .monthly
+    ///   .weekly    flicked down ≥ velocityThreshold  →  .monthly  (however short)
+    ///   anything else                                →  unchanged
     /// ```
     ///
-    /// This is the **commit** decision, taken once, when the finger lifts. The
+    /// `translation` and `velocity` are `DragGesture.Value.translation.height`
+    /// and `.velocity.height`: both negative upward, velocity in points/second.
+    ///
+    /// The velocity path is what makes a quick flick work. Distance alone forces
+    /// the user to physically drag the calendar most of the way shut, which is
+    /// slow and reads as unresponsive; a flick says the same thing in a tenth of
+    /// the movement. Speed is only ever *additive* here — it can commit a drag
+    /// that was too short, never veto one that was long enough.
+    ///
+    /// This is the commit decision, taken once, when the finger lifts. The
     /// calendar has been tracking the drag the whole way there via
     /// `progress(forHandleTranslation:from:travel:)`; this says whether that
     /// preview becomes real or is animated back where it came from.
     ///
-    /// Note the two distances are independent on purpose. Tracking maps against
-    /// the full collapsible height, so the calendar moves with the finger;
-    /// committing needs only `threshold`, so a short decisive flick is enough to
-    /// switch without having to drag the calendar shut by hand.
+    /// Note that the tracking distance and `threshold` are independent on
+    /// purpose. Tracking maps against the full collapsible height, so the
+    /// calendar moves with the finger; committing needs only `threshold`.
     static func mode(
         forHandleTranslation translation: Double,
+        velocity: Double,
         from mode: EZCalendarAgendaMode,
-        threshold: Double
+        threshold: Double,
+        velocityThreshold: Double
     ) -> EZCalendarAgendaMode {
-        guard threshold > 0 else { return mode }
-
         switch mode {
         case .monthly:
+            if velocityThreshold > 0, velocity <= -velocityThreshold { return .weekly }
+            guard threshold > 0 else { return mode }
             return translation <= -threshold ? .weekly : .monthly
+
         case .weekly:
+            if velocityThreshold > 0, velocity >= velocityThreshold { return .monthly }
+            guard threshold > 0 else { return mode }
             return translation >= threshold ? .monthly : .weekly
         }
     }

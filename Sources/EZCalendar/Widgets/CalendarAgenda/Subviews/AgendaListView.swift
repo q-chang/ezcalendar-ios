@@ -81,7 +81,10 @@ struct AgendaListView<Event: Identifiable, ListHeaderView: View, EventItemView: 
                         viewModel.handleDragChanged(translation: value.translation.height)
                     }
                     .onEnded { value in
-                        viewModel.handleDragEnded(translation: value.translation.height)
+                        viewModel.handleDragEnded(
+                            translation: value.translation.height,
+                            velocity: value.velocity.height
+                        )
                     }
             )
     }

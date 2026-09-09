@@ -78,7 +78,7 @@ import SwiftUI
      }
  )
  .gridLineColor(.secondary.opacity(0.1))
- .collapseThreshold(100)
+ .collapseThreshold(78)
  ```
 
  A shorter initializer drops `titleViewContent`, `emptyDayViewContent` and
@@ -102,10 +102,12 @@ import SwiftUI
 
  * **`.gridLineColor(_:)`** — background behind the grid, showing through the
    1pt row and column gaps as grid lines.
- * **`.collapseThreshold(_:)`** — points of drag or scroll that make a full
-   collapse or expand. Default `100`.
+ * **`.collapseThreshold(_:)`** — how far the handle must be dragged, on
+   release, to switch modes. Default `78`.
+ * **`.collapseVelocityThreshold(_:)`** — how fast it must be flicked to switch
+   regardless of distance, in points per second. Default `350`.
  * **`.collapseAnimation(_:)`** — how a released gesture settles. Default
-   `.snappy(duration: 0.28)`.
+   `.easeOut(duration: 0.3)`.
 
  ---
 
@@ -129,13 +131,14 @@ import SwiftUI
  weeks fading as the grid closes over them — and nothing is committed until the
  finger lifts:
 
- | On release, dragged | Result |
+ | On release | Result |
  | --- | --- |
- | at least `collapseThreshold` the right way | animates the rest of the way and switches |
- | less than that, or the wrong way | animates back to where it started |
+ | dragged at least `collapseThreshold` the right way | animates the rest of the way and switches |
+ | flicked at least `collapseVelocityThreshold` the right way | switches too, however short the drag |
+ | neither, or the wrong way | animates back to where it started |
 
- So a short flick commits even though it only moved the calendar a little, and a
- long exploratory drag can still be abandoned.
+ So a quick flick switches without dragging the calendar shut by hand, and a
+ long exploratory drag can still be abandoned by reversing it before letting go.
 
  **The handle is the only surface that does this.** Scrolling the event list only
  ever scrolls the list, in either direction, over-scroll included.
@@ -220,8 +223,9 @@ public struct EZCalendarAgendaView<
     // MARK: - Modifier state
 
     private var gridLineColor: Color?
-    private var collapseThreshold: Double = 100
-    private var collapseAnimation: Animation = .snappy(duration: 0.28)
+    private var collapseThreshold: Double = 78
+    private var collapseVelocityThreshold: Double = 350
+    private var collapseAnimation: Animation = .easeOut(duration: 0.3)
 
     public init(
         withCalendar calendar: Calendar,
@@ -384,6 +388,7 @@ public struct EZCalendarAgendaView<
 
     private func start() {
         viewModel.collapseThreshold = collapseThreshold
+        viewModel.collapseVelocityThreshold = collapseVelocityThreshold
         viewModel.collapseAnimation = collapseAnimation
 
         viewModel.rebuildPages(from: calendarMonths)
@@ -415,7 +420,8 @@ public struct EZCalendarAgendaView<
     }
 
     /// How far the grab handle must be dragged, on release, to switch modes.
-    /// A drag that stops short of this springs back. Default `100`.
+    /// A drag that stops short of this springs back — unless it was fast enough
+    /// to clear `collapseVelocityThreshold(_:)`. Default `78`.
     ///
     /// This is only the commit decision. While the finger is down the calendar
     /// tracks it against the grid's own collapsible height, so the two distances
@@ -425,6 +431,19 @@ public struct EZCalendarAgendaView<
 
         var view = self
         view.collapseThreshold = Double(points)
+        return view
+    }
+
+    /// How fast the grab handle must be flicked, in points per second, to switch
+    /// modes regardless of how far it travelled. Default `350`.
+    ///
+    /// Speed is additive: it can commit a drag that was too short, never veto
+    /// one that was long enough. Pass `0` to require the distance every time.
+    public func collapseVelocityThreshold(_ pointsPerSecond: CGFloat) -> Self {
+        guard pointsPerSecond >= 0 else { return self }
+
+        var view = self
+        view.collapseVelocityThreshold = Double(pointsPerSecond)
         return view
     }
 
