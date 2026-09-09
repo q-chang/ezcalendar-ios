@@ -21,6 +21,10 @@ struct ContentView: View {
             Button("Horizontal Pagging") {
                 router.navigate(to: Destination.horizontal_paging)
             }
+            
+            Button("Agenda (Calendar + List)") {
+                router.navigate(to: Destination.agenda)
+            }
         }
         .padding()
     }
