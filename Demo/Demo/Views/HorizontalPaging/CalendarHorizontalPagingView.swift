@@ -39,6 +39,18 @@ import EZCalendar
 
  Using `.onChange(of: viewModel.currentMonth)`, the demo can trigger side effects (like fetching new events from an API or database) whenever the visible month changes.
 
+ ### 4. Single Date Selection
+
+ The library has no selection state — the caller owns it. Each day cell is a `Button` that writes `viewModel.selectedDate`, and the cell draws a red ring when `viewModel.isSelected(calendarDay)` is true:
+ ```swift
+ Button { viewModel.select(calendarDay) } label: { ... }
+     .buttonStyle(.plain)
+ ```
+
+ * **Current-month days only:** Padding days are ignored, so one date never highlights on two adjacent pages.
+ * **Calendar-aware comparison:** Matching uses `calendar.isDate(_:inSameDayAs:)` rather than `==`.
+ * **Survives paging:** The selection persists while swiping between months.
+
  ---
 
  ## 🛠️ Implementation Breakdown
@@ -132,21 +144,41 @@ struct CalendarHorizontalPagingView: View {
                                 height: 24
                             )
                     } dayItemViewContent: { calendarDay in
-                        
-                        Text(" \(calendarDay.date?.get(.day) ?? 0) ")
-                            .foregroundStyle(
-                                calendarDay.isCurrentMonth
-                                ? Color.black
-                                : Color.gray
-                            )
-                            .padding(4)
-                            .background(calendarDay.hasEvents ? Color.blue : Color.clear)
-                            .frame(
-                                width: proxy.size.width / 7,
-                                height: proxy.size.width / 7
-                            )
+
+                        Button {
+                            viewModel.select(calendarDay)
+                        } label: {
+                            Text(" \(calendarDay.date?.get(.day) ?? 0) ")
+                                .foregroundStyle(
+                                    calendarDay.isCurrentMonth
+                                    ? Color.black
+                                    : Color.gray
+                                )
+                                .padding(4)
+                                .background(calendarDay.hasEvents ? Color.blue : Color.clear)
+                                .frame(
+                                    width: proxy.size.width / 7,
+                                    height: proxy.size.width / 7
+                                )
+                                .overlay {
+                                    if viewModel.isSelected(calendarDay) {
+                                        Circle()
+                                            .stroke(Color.red, lineWidth: 2)
+                                            .padding(4)
+                                    }
+                                }
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
                     }
                     .weekdayScrollable(true)
+
+                    Text(
+                        viewModel.selectedDate?.toString(
+                            dateFormat: "EEEE d MMMM yyyy",
+                            locale: viewModel.calendar.locale ?? .current
+                        ) ?? "No date selected"
+                    )
                 }
             }
         }
