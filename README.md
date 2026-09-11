@@ -62,7 +62,7 @@ Or in `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/q-chang/ezcalendar-ios", from: "1.3.1")
+    .package(url: "https://github.com/q-chang/ezcalendar-ios", from: "2.0.0")
 ]
 ```
 
@@ -470,6 +470,145 @@ CalendarEvent(eventDate: calendar.startOfDay(for: rawDate))
 
 ---
 
+## 🎯 Date selection
+
+`EZCalendarItemView` and `EZCalendarHorizontalPagingView` keep no selection state. Keep the selected date (or range) in your own state, make the day cell a `Button`, and draw the mark inside `dayItemViewContent`. (`EZCalendarAgendaView` is different: it has its own `selectedDate` binding.)
+
+### Single date
+
+```swift
+@State private var selectedDate: Date?
+
+EZCalendarHorizontalPagingView(
+    withCalendar: calendar,
+    currentMonth: $currentMonth,
+    calendarMonths: $calendarMonths
+) { weekdayTitle in
+    Text(weekdayTitle).frame(maxWidth: .infinity)
+} dayItemViewContent: { calendarDay in
+    if calendarDay.isCurrentMonth, let date = calendarDay.date {
+        let isSelected = selectedDate.map { calendar.isDate($0, inSameDayAs: date) } ?? false
+
+        Button {
+            selectedDate = date
+        } label: {
+            Text("\(calendar.component(.day, from: date))")
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .overlay {
+                    if isSelected {
+                        Circle().stroke(.red, lineWidth: 2)
+                    }
+                }
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    } else {
+        Color.clear.frame(height: 44)   // padding day
+    }
+}
+```
+
+### Range (Start Date → End Date)
+
+<p align="center">
+  <img src="docs/assets/range-selection-demo.png" width="240" alt="A bottom sheet showing July 2569 on the Thai Buddhist calendar, with the 3rd marked as Start and a light band running to the end of the month, continuing into August">
+  <br>
+  <sub>The Demo's <b>Range Selection</b> screen: 3 July → 4 August 2569, crossing a page.</sub>
+</p>
+
+| Current state | Tapped day | Result |
+| --- | --- | --- |
+| nothing selected | any | Start = day |
+| Start only | after Start | End = day |
+| Start only | same day as Start | End = Start — a one-day range |
+| Start only | before Start | Start = day, End stays empty |
+| Start + End | any | Start = day, End cleared — a new range begins |
+
+```swift
+struct DateRangeSelection {
+    var startDate: Date?
+    var endDate: Date?
+
+    mutating func select(_ date: Date, calendar: Calendar) {
+        let day = calendar.startOfDay(for: date)
+
+        // Nothing selected yet, or a finished range: this tap starts a new one.
+        guard let startDate, endDate == nil else {
+            self.startDate = day
+            self.endDate = nil
+            return
+        }
+
+        if day < startDate {
+            self.startDate = day   // before Start: it becomes the new Start
+        } else {
+            self.endDate = day     // on or after Start
+        }
+    }
+
+    func isEndpoint(_ date: Date, calendar: Calendar) -> Bool {
+        [startDate, endDate].contains { endpoint in
+            endpoint.map { calendar.isDate($0, inSameDayAs: date) } ?? false
+        }
+    }
+
+    /// A one-day range has no band.
+    func isInRange(_ date: Date, calendar: Calendar) -> Bool {
+        guard let startDate, let endDate,
+              !calendar.isDate(startDate, inSameDayAs: endDate) else { return false }
+        let day = calendar.startOfDay(for: date)
+        return day >= startDate && day <= endDate
+    }
+}
+```
+
+The day cell draws a band for days in the range and a filled square for Start and End:
+
+```swift
+@State private var range = DateRangeSelection()
+
+// dayItemViewContent:
+if calendarDay.isCurrentMonth, let date = calendarDay.date {
+    let isEndpoint = range.isEndpoint(date, calendar: calendar)
+    let isInRange = range.isInRange(date, calendar: calendar)
+
+    Button {
+        range.select(date, calendar: calendar)
+    } label: {
+        Text("\(calendar.component(.day, from: date))")
+            .foregroundStyle(isEndpoint ? .white : .primary)
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .background {
+                ZStack {
+                    if isInRange {
+                        Color.blue.opacity(0.12)
+                            .frame(height: 38)
+                            .padding(.horizontal, -0.5)   // bridge the grid's 1pt column gap
+                    }
+                    if isEndpoint {
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(.blue)
+                            .frame(width: 38, height: 38)
+                    }
+                }
+            }
+            .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+} else {
+    Color.clear.frame(height: 44)
+}
+```
+
+### Things that bite
+
+- **Skip padding days.** A date like 1 August also appears as a padding cell on July's page. If padding cells can be selected or marked, one date shows up on two pages. Check `isCurrentMonth` first.
+- **Compare by day, not with `==`.** Use `calendar.isDate(_:inSameDayAs:)`, and store `calendar.startOfDay(for:)` so `<` and `>` comparisons ignore the time.
+- **The grid leaves 1pt between columns.** A band sized to the cell shows hairline gaps. Push it `0.5pt` past each side, as above.
+- **Months have 4–6 rows.** In a sheet or card, give the pager a fixed six-row height. Otherwise the container changes height as the user pages.
+
+---
+
 ## 🎨 Vertical scrolling
 
 `EZCalendarItemView` is an ordinary `View`, so a scrolling multi-month list is just a stack:
@@ -525,6 +664,11 @@ The suite covers `EZCalendarAgendaView`'s logic — page building, selection rul
 The Demo's Swift package reference points at this repository, so it builds the sources in `Sources/EZCalendar` directly.
 
 It includes an **Agenda** screen exercising `EZCalendarAgendaView`: tap-to-select with auto-collapse, two-way scroll sync, handle-drag collapse, and manual paging.
+
+Two screens show [date selection](#-date-selection) built on `EZCalendarHorizontalPagingView`:
+
+- **Horizontal Pagging** — single-date selection. Tap a day to put a ring on it; the selected date is shown under the calendar.
+- **Range Selection** — a form field that opens a bottom-sheet picker for a Start/End range, using the Thai Buddhist calendar. The sheet edits a draft; **เลือกวัน** saves it and **✕** throws it away. Source: `Demo/Demo/Views/RangeSelection/`.
 
 ---
 

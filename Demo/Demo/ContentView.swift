@@ -25,6 +25,10 @@ struct ContentView: View {
             Button("Agenda (Calendar + List)") {
                 router.navigate(to: Destination.agenda)
             }
+
+            Button("Range Selection") {
+                router.navigate(to: Destination.range_selection)
+            }
         }
         .padding()
     }
