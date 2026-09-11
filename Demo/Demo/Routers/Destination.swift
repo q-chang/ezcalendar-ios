@@ -11,4 +11,5 @@ enum Destination: Hashable {
     case item
     case horizontal_paging
     case agenda
+    case range_selection
 }

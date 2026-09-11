@@ -15,7 +15,8 @@ class CalendarHorizontalPaggingViewModel: ObservableObject {
     @Published var startDate: Date
     @Published var endDate: Date
     @Published var currentMonth: Date
-    
+    @Published var selectedDate: Date?
+
     @Published var calendarMonths: [CalendarMonth]
     
     init(withCalendar calendar: Calendar = Calendar.init(identifier: .gregorian)) {
@@ -37,6 +38,24 @@ class CalendarHorizontalPaggingViewModel: ObservableObject {
     
     func isDateLessThanOrEqualEndDate(_ date: Date) -> Bool {
         date <= endDate.endOfMonth
+    }
+
+    // Padding days belong to the neighbouring month's page, so only days of the
+    // visible month are selectable — otherwise one date could highlight on two pages.
+    func select(_ calendarDay: CalendarDay) {
+        guard calendarDay.isCurrentMonth, let date = calendarDay.date else {
+            return
+        }
+        selectedDate = date
+    }
+
+    func isSelected(_ calendarDay: CalendarDay) -> Bool {
+        guard calendarDay.isCurrentMonth,
+              let date = calendarDay.date,
+              let selectedDate else {
+            return false
+        }
+        return calendar.isDate(date, inSameDayAs: selectedDate)
     }
 
     func updateEvents(_ monthDate: Date) {

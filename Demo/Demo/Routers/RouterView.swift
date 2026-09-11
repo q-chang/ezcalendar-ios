@@ -24,11 +24,17 @@ struct RouterView: View {
                         )
                     case .agenda:
                         DemoAgendaView(viewModel: .init(withCalendar: .current))
+                    case .range_selection:
+                        // Thai Buddhist, to match the mock (กรกฎาคม 2569).
+                        DemoRangeSelectionView(viewModel: .init(withCalendar: {
+                            var calendar: Calendar = .init(identifier: .buddhist)
+                            calendar.locale = Locale(identifier: "th-TH")
+                            return calendar
+                        }()))
                     }
                 }
         }
-        .environmentObject(router)
-    }
+        .environmentObject(router)    }
 }
 
 #Preview {
