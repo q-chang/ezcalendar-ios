@@ -62,7 +62,7 @@ Or in `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/q-chang/ezcalendar-ios", from: "1.3.1")
+    .package(url: "https://github.com/q-chang/ezcalendar-ios", from: "2.0.0")
 ]
 ```
 
