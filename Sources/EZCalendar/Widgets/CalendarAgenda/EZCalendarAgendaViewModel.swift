@@ -270,13 +270,11 @@ final class EZCalendarAgendaViewModel: ObservableObject {
 
     /// A tap on a day cell.
     ///
-    /// Selecting always collapses: in `.monthly` the tap doubles as the
-    /// month → week snap, which is why the user never has to drag to get the
-    /// list its full height.
-    func selectDay(_ date: Date) {
+    /// Updates the selected day and optionally collapses a monthly calendar.
+    func selectDay(_ date: Date, collapseOnSelection: Bool = true) {
         selection = calendar.startOfDay(for: date)
 
-        if mode == .monthly {
+        if mode == .monthly && collapseOnSelection {
             mode = .weekly
         }
     }
