@@ -74,6 +74,7 @@ under either convention.
 | **`build-ezcalendar`** | Any source change. Which build commands work, which are known-broken. |
 | **`verify-calendar-grid`** | Touching date math, padding days, locales, or calendar systems. Throwaway harness with a recorded baseline. |
 | **`release-ezcalendar`** | Tagging, version bumps, publishing for SwiftPM consumers. |
+| **`write-changelog`** | Drafting or updating `CHANGELOG.md` from repository changes. |
 
 Useful built-ins: `code-review` for diffs, `security-review` before release.
 
