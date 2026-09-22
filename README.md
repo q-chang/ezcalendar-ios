@@ -384,6 +384,47 @@ The monthly calendar measures each rendered week row and sizes its window from
 the complete month grid. A month can therefore have 4, 5, or 6 rows, and the
 height also follows the custom layout supplied by `dayItemViewContent`.
 
+#### Pull to refresh in the calendar area
+
+`pullToRefresh` recognises a downward vertical pull in the title, weekday, and
+calendar-grid area. It does not attach to the event list, grab handle, or
+horizontal month pager. The library inserts your indicator immediately above
+`titleViewContent`; it pushes the title and grid down rather than floating over
+the calendar. The library supplies gesture state only; you draw the indicator
+and perform the refresh work:
+
+```swift
+EZCalendarAgendaView(/* ... */)
+    .pullToRefresh(
+        minimumDisplayDuration: 1.2, // clamped to 1...3 seconds
+        indicator: { context in
+            HStack(spacing: 8) {
+                if context.phase == .refreshing {
+                    ProgressView()
+                } else {
+                    Image(systemName: context.phase == .armed
+                        ? "arrow.down.circle.fill"
+                        : "arrow.down.circle")
+                }
+                Text(context.phase == .armed ? "Release to refresh" : "Pull to refresh")
+            }
+            .padding(8)
+            .background(.thinMaterial, in: Capsule())
+            .frame(maxWidth: .infinity)
+            .frame(height: context.phase == .refreshing ? 48 : 48 * CGFloat(context.progress))
+            .clipped()
+        },
+        onRefresh: {
+            await viewModel.reloadAgenda()
+        }
+    )
+```
+
+`EZCalendarAgendaRefreshContext.phase` progresses through `.pulling`, `.armed`,
+and `.refreshing`; `progress` is `0...1` of the pull threshold. The refresh
+action is called only after release from `.armed`. The indicator hides after
+both the action completes and the configured minimum display time has elapsed.
+
 **Behavior**
 
 | Interaction | Result |
@@ -406,6 +447,7 @@ Page it programmatically with `EZCalendarAgendaPaging.selection(paging:from:mode
 | `.collapseVelocityThreshold(_:)` | `350` | How fast it must be flicked (points/second) to commit regardless of distance. `0` disables the flick. |
 | `.collapseAnimation(_:)` | `.easeOut(duration: 0.3)` | How a released gesture settles. |
 | `.collapseOnDaySelection(_:)` | `true` | Whether tapping a day while in `.monthly` switches the calendar to `.weekly`. |
+| `.pullToRefresh(minimumDisplayDuration:indicator:onRefresh:)` | disabled | Adds caller-styled refresh to a downward vertical pull in the calendar area. The duration is clamped to 1...3 seconds. |
 
 > **Use `context.hasEvents`, not `context.day.hasEvents`.** The agenda buckets your events by *day*, so its flag works for events stamped at a real time and for padding days — neither of which `CalendarDay.hasEvents` handles. See limitation 2 below.
 

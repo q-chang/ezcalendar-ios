@@ -82,6 +82,12 @@ final class DemoAgendaViewModel: ObservableObject {
         return "\(calendar.component(.day, from: date))"
     }
 
+    /// Simulates caller-owned refresh work. The agenda component owns the
+    /// gesture and indicator lifecycle; fetching and updating data stay here.
+    func refreshAgenda() async {
+        try? await Task.sleep(nanoseconds: 900_000_000)
+    }
+
     // MARK: - Sample data
 
     /// A stable, boring spread: some days busy, some days with a single job,

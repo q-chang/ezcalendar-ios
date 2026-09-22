@@ -96,6 +96,25 @@ final class EZCalendarAgendaViewModel: ObservableObject {
     /// the collapse animation has no constant it could use instead.
     @Published var gridHeights: [String: Double] = [:]
 
+    // MARK: - Pull-to-refresh state
+
+    /// State supplied to the caller's refresh-indicator view. Refresh is kept
+    /// here, rather than in `AgendaCalendarView`, so an in-flight async action
+    /// survives ordinary SwiftUI body recomputation.
+    @Published private(set) var refreshContext = EZCalendarAgendaRefreshContext(
+        phase: .idle,
+        progress: 0
+    )
+
+    private enum RefreshDragAxis {
+        case undecided
+        case horizontal
+        case vertical
+    }
+
+    private var refreshDragAxis: RefreshDragAxis = .undecided
+    private var refreshTask: Task<Void, Never>?
+
     // MARK: - List state
 
     /// Where each visible section header sits, in the list's coordinate space.
@@ -168,6 +187,11 @@ final class EZCalendarAgendaViewModel: ObservableObject {
     /// change: the month grids come straight from `EZCalendarItemViewModel`, and
     /// the week set is a de-duplicated flattening of them.
     func rebuildPages(from months: [CalendarMonth]) {
+        // CalendarWeek identities are regenerated with the page data, so a
+        // previous row-height measurement is no longer valid. Let the visible
+        // page report its own rows again rather than briefly clipping to a
+        // stale height.
+        gridHeights = [:]
         monthPages = EZCalendarAgendaLogic.monthPages(from: months, calendar: calendar)
         weekPages = EZCalendarAgendaLogic.weekPages(from: monthPages, calendar: calendar)
     }
@@ -373,6 +397,74 @@ final class EZCalendarAgendaViewModel: ObservableObject {
             withAnimation(collapseAnimation) {
                 progress = mode.progress
             }
+        }
+    }
+
+    // MARK: - Pull-to-refresh
+
+    /// Tracks a downward pull from the calendar area. Direction is locked only
+    /// after a small initial movement, allowing the horizontal pager to own a
+    /// horizontal swipe without refresh state changing underneath it.
+    func refreshDragChanged(translation: CGSize, threshold: Double) {
+        guard refreshContext.phase != .refreshing else { return }
+
+        switch refreshDragAxis {
+        case .undecided:
+            let horizontal = abs(translation.width)
+            let vertical = abs(translation.height)
+            guard max(horizontal, vertical) >= 6 else { return }
+
+            guard translation.height > 0, vertical > horizontal else {
+                refreshDragAxis = .horizontal
+                return
+            }
+
+            refreshDragAxis = .vertical
+
+        case .horizontal:
+            return
+
+        case .vertical:
+            break
+        }
+
+        guard threshold > 0 else {
+            refreshContext = EZCalendarAgendaRefreshContext(phase: .idle, progress: 0)
+            return
+        }
+
+        let progress = EZCalendarAgendaLogic.clamp(translation.height / threshold)
+        let phase: EZCalendarAgendaRefreshPhase = progress >= 1 ? .armed : .pulling
+        refreshContext = EZCalendarAgendaRefreshContext(phase: phase, progress: progress)
+    }
+
+    /// Releases the calendar-area pull. Only an armed vertical pull invokes the
+    /// caller's refresh work; every other release returns quietly to idle.
+    func refreshDragEnded(configuration: AgendaRefreshConfiguration) {
+        defer { refreshDragAxis = .undecided }
+
+        guard refreshContext.phase == .armed else {
+            if refreshContext.phase != .refreshing {
+                refreshContext = EZCalendarAgendaRefreshContext(phase: .idle, progress: 0)
+            }
+            return
+        }
+
+        refreshContext = EZCalendarAgendaRefreshContext(phase: .refreshing, progress: 1)
+
+        refreshTask?.cancel()
+        refreshTask = Task { [weak self] in
+            let started = Date()
+            await configuration.onRefresh()
+
+            let remaining = configuration.minimumDisplayDuration - Date().timeIntervalSince(started)
+            if remaining > 0 {
+                try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
+            }
+
+            guard !Task.isCancelled else { return }
+            self?.refreshContext = EZCalendarAgendaRefreshContext(phase: .idle, progress: 0)
+            self?.refreshTask = nil
         }
     }
 

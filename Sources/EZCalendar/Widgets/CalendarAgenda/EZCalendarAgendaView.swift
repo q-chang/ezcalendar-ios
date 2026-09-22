@@ -29,7 +29,8 @@ import SwiftUI
  ```
 
  Like everything else in this package, it renders **no styling of its own**. It
- owns structure, state and gesture math; all seven visual slots are yours.
+ owns structure, state and gesture math; all seven base visual slots — plus an
+ optional pull-to-refresh indicator — are yours.
 
  ---
 
@@ -227,6 +228,7 @@ public struct EZCalendarAgendaView<
     private var collapseVelocityThreshold: Double = 350
     private var collapseAnimation: Animation = .easeOut(duration: 0.3)
     private var collapseOnDaySelection = true
+    private var refreshConfiguration: AgendaRefreshConfiguration?
 
     public init(
         withCalendar calendar: Calendar,
@@ -278,6 +280,7 @@ public struct EZCalendarAgendaView<
                 weekDayTitles: weekDayTitles,
                 locale: locale,
                 gridLineColor: gridLineColor,
+                refreshConfiguration: refreshConfiguration,
                 titleViewContent: titleViewContent,
                 weekdayItemViewContent: weekdayItemViewContent,
                 dayItemViewContent: dayCell
@@ -460,6 +463,48 @@ public struct EZCalendarAgendaView<
     public func collapseOnDaySelection(_ enabled: Bool) -> Self {
         var view = self
         view.collapseOnDaySelection = enabled
+        return view
+    }
+
+    /**
+     Adds a pull-to-refresh gesture to the agenda's calendar area.
+
+     The gesture only activates for a downward, predominantly vertical pull in
+     the title/header/grid area. Horizontal month paging, the grab handle, and
+     the event list remain independent. The library does not draw a spinner:
+     `indicator` receives the live phase and threshold progress so the caller
+     owns every pixel. It is inserted immediately above `titleViewContent`,
+     rather than floating over the month grid.
+
+     `onRefresh` is called only after the user releases an armed pull. The
+     indicator remains visible for the longer of the closure's execution and
+     `minimumDisplayDuration`. Values are clamped to the supported 1...3 second
+     range.
+
+     ```swift
+     .pullToRefresh(
+         minimumDisplayDuration: 1.2,
+         indicator: { context in
+             RefreshIndicator(context: context)
+         },
+         onRefresh: {
+             await viewModel.reload()
+         }
+     )
+     ```
+     */
+    public func pullToRefresh<Indicator: View>(
+        minimumDisplayDuration: TimeInterval = 1,
+        @ViewBuilder indicator: @escaping (EZCalendarAgendaRefreshContext) -> Indicator,
+        onRefresh: @escaping @MainActor () async -> Void
+    ) -> Self {
+        var view = self
+        view.refreshConfiguration = AgendaRefreshConfiguration(
+            threshold: 72,
+            minimumDisplayDuration: min(max(minimumDisplayDuration, 1), 3),
+            indicator: { context in AnyView(indicator(context)) },
+            onRefresh: onRefresh
+        )
         return view
     }
 }

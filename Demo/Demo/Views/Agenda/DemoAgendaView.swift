@@ -19,6 +19,8 @@ import EZCalendar
  * **Event card** — title and time range, nothing more.
  * **Sticky header** — the date, plus "No jobs scheduled" on an empty day.
  * **Title bar** — `‹ July 2026 ›`, driven by the component's own paging closures.
+ * **Pull to refresh** — a caller-styled indicator above the title bar and a
+   simulated asynchronous reload.
 
  The calendar switches between month and week only via the grab handle, the
  Collapse/Expand button, or tapping a day. Scrolling the event list just scrolls
@@ -47,6 +49,13 @@ struct DemoAgendaView: View {
                 handleViewContent: grabHandle
             )
             .gridLineColor(Color(.separator).opacity(0.35))
+            .pullToRefresh(
+                minimumDisplayDuration: 1.2,
+                indicator: refreshIndicator,
+                onRefresh: {
+                    await viewModel.refreshAgenda()
+                }
+            )
         }
         .background(Color(.systemGroupedBackground))
         .navigationTitle("Agenda")
@@ -107,6 +116,51 @@ struct DemoAgendaView: View {
             .frame(maxWidth: .infinity)
             .frame(height: 24)
             .background(Color(.systemBackground))
+    }
+
+    private func refreshIndicator(_ context: EZCalendarAgendaRefreshContext) -> some View {
+        HStack(spacing: 8) {
+            if context.phase == .refreshing {
+                ProgressView()
+                    .controlSize(.small)
+            } else {
+                Image(systemName: context.phase == .armed ? "arrow.down.circle.fill" : "arrow.down.circle")
+                    .symbolRenderingMode(.hierarchical)
+            }
+
+            Text(refreshMessage(for: context.phase))
+                .font(.caption.weight(.medium))
+        }
+        .foregroundStyle(Color.accentColor)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(.thinMaterial, in: Capsule())
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity)
+        // The library puts this slot directly before `titleViewContent`.
+        // Let the pull distance reveal it gradually, while a committed refresh
+        // gives the spinner its complete natural height.
+        .frame(height: refreshIndicatorHeight(for: context), alignment: .bottom)
+        .clipped()
+        .accessibilityElement(children: .combine)
+    }
+
+    private func refreshIndicatorHeight(for context: EZCalendarAgendaRefreshContext) -> CGFloat {
+        let fullHeight: CGFloat = 48
+        return context.phase == .refreshing
+            ? fullHeight
+            : fullHeight * context.progress
+    }
+
+    private func refreshMessage(for phase: EZCalendarAgendaRefreshPhase) -> String {
+        switch phase {
+        case .idle, .pulling:
+            return "Pull to refresh"
+        case .armed:
+            return "Release to refresh"
+        case .refreshing:
+            return "Refreshing agenda…"
+        }
     }
 
     private func dayCell(_ context: EZCalendarDayContext) -> some View {

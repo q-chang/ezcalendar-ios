@@ -32,13 +32,26 @@ struct AgendaCalendarView<TitleView: View, WeekdayItemView: View, DayItemView: V
     let weekDayTitles: [String]?
     let locale: Locale
     let gridLineColor: Color?
+    let refreshConfiguration: AgendaRefreshConfiguration?
 
     let titleViewContent: (EZCalendarAgendaTitleContext) -> TitleView
     let weekdayItemViewContent: (String) -> WeekdayItemView
     let dayItemViewContent: (CalendarDay) -> DayItemView
 
     var body: some View {
+        if let refreshConfiguration {
+            calendarContent
+                .contentShape(Rectangle())
+                .simultaneousGesture(refreshGesture(configuration: refreshConfiguration))
+        } else {
+            calendarContent
+        }
+    }
+
+    private var calendarContent: some View {
         VStack(spacing: 0) {
+            refreshIndicator
+
             titleViewContent(titleContext)
 
             EZCalendarWeekdayHeaderView(
@@ -49,6 +62,35 @@ struct AgendaCalendarView<TitleView: View, WeekdayItemView: View, DayItemView: V
 
             calendarWindow
         }
+    }
+
+    /// The refresh slot is structurally above the caller's title bar rather
+    /// than overlaid on the grid. The caller controls its height while pulling
+    /// (typically from `context.progress`), so the library imposes no visual
+    /// treatment or fixed layout on a custom indicator.
+    @ViewBuilder
+    private var refreshIndicator: some View {
+        if let refreshConfiguration,
+           viewModel.refreshContext.phase != .idle {
+            refreshConfiguration.indicator(viewModel.refreshContext)
+                .allowsHitTesting(false)
+        }
+    }
+
+    /// A simultaneous gesture lets the month pager continue owning horizontal
+    /// swipes. `EZCalendarAgendaViewModel` direction-locks the first meaningful
+    /// movement, so only a downward vertical pull changes refresh state.
+    private func refreshGesture(configuration: AgendaRefreshConfiguration) -> some Gesture {
+        DragGesture(minimumDistance: 1)
+            .onChanged { value in
+                viewModel.refreshDragChanged(
+                    translation: value.translation,
+                    threshold: configuration.threshold
+                )
+            }
+            .onEnded { _ in
+                viewModel.refreshDragEnded(configuration: configuration)
+            }
     }
 
     /// Data and actions for the caller's `‹ July 2569 ›` bar.
@@ -99,11 +141,10 @@ struct AgendaCalendarView<TitleView: View, WeekdayItemView: View, DayItemView: V
 
     private var monthPager: some View {
         ScrollView(.horizontal) {
-            // Use a regular HStack here so the visible month's complete natural
-            // height is resolved before the clipping window is measured. A
-            // LazyHStack may leave a six-row page with a stale five-row height
-            // when caller-provided day cells have custom sizing.
-            HStack(alignment: .top, spacing: 0) {
+            // Each visible month contains a non-lazy VStack of all its week
+            // rows, so row measurement stays complete. Keeping the page strip
+            // lazy avoids constructing every configured month during a swipe.
+            LazyHStack(alignment: .top, spacing: 0) {
                 ForEach(viewModel.monthPages) { page in
                     AgendaMonthGridView(
                         page: page,
@@ -119,9 +160,13 @@ struct AgendaCalendarView<TitleView: View, WeekdayItemView: View, DayItemView: V
         .scrollTargetBehavior(.viewAligned)
         .scrollPosition(id: $viewModel.visibleMonthID)
         .scrollIndicators(.never)
-        // Take the content's own height rather than the proposal, so the window
-        // above can clip a grid that is measuring itself at full size.
-        .fixedSize(horizontal: false, vertical: true)
+        // Do not apply `.fixedSize(vertical: true)` here. A horizontal
+        // `ScrollView` then keeps its initial five-row internal viewport even
+        // when the outer window grows for a six-row month; a wrapping frame
+        // merely exposes blank space below that clipped viewport. Giving the
+        // scroll view the measured window height directly lets its own clipping
+        // region grow with the visible page.
+        .frame(height: calendarWindowHeight, alignment: .top)
         .onChange(of: viewModel.visibleMonthID) { _, id in
             viewModel.pagerScrolled(to: id)
         }
