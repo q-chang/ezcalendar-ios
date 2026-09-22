@@ -86,13 +86,24 @@ struct AgendaCalendarView<TitleView: View, WeekdayItemView: View, DayItemView: V
                 monthPager
             }
         }
-        .frame(height: viewModel.calendarHeight(for: viewModel.visibleMonthPage).map { CGFloat($0) }, alignment: .top)
+        // The window height is calculated from the measured week rows. This
+        // keeps four-, five-, and six-row months distinct in expanded mode and
+        // gives the collapse animation the same complete month height.
+        .frame(height: calendarWindowHeight, alignment: .top)
         .clipped()
+    }
+
+    private var calendarWindowHeight: CGFloat? {
+        return viewModel.calendarHeight(for: viewModel.visibleMonthPage).map { CGFloat($0) }
     }
 
     private var monthPager: some View {
         ScrollView(.horizontal) {
-            LazyHStack(alignment: .top, spacing: 0) {
+            // Use a regular HStack here so the visible month's complete natural
+            // height is resolved before the clipping window is measured. A
+            // LazyHStack may leave a six-row page with a stale five-row height
+            // when caller-provided day cells have custom sizing.
+            HStack(alignment: .top, spacing: 0) {
                 ForEach(viewModel.monthPages) { page in
                     AgendaMonthGridView(
                         page: page,
@@ -114,8 +125,12 @@ struct AgendaCalendarView<TitleView: View, WeekdayItemView: View, DayItemView: V
         .onChange(of: viewModel.visibleMonthID) { _, id in
             viewModel.pagerScrolled(to: id)
         }
-        .onPreferenceChange(AgendaGridHeightKey.self) { heights in
-            viewModel.gridHeights.merge(heights) { _, new in new }
+        .onPreferenceChange(AgendaGridRowHeightKey.self) { rowHeights in
+            for (pageID, rows) in rowHeights {
+                let height = rows.values.reduce(0, +)
+                    + viewModel.gridSpacing * Double(max(0, rows.count - 1))
+                viewModel.gridHeights[pageID] = height
+            }
         }
     }
 

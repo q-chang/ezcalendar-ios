@@ -22,6 +22,30 @@ authoritative package version.
 .package(url: "https://github.com/q-chang/ezcalendar-ios", from: "NEXT_VERSION")
 ```
 
+## EZCalendar 2.0.3
+
+This patch fixes the agenda calendar's month height calculation for custom day
+cell layouts.
+
+### 🐛 Fixes
+- `EZCalendarAgendaView` now measures each rendered week row and sizes the
+  monthly calendar from the complete row set. Four-, five-, and six-row months
+  no longer collapse into a five-row height or clip the final week.
+- Monthly paging now lays out the complete page needed for reliable row-height
+  measurement while preserving the existing weekly collapse behavior.
+
+### 📚 Documentation
+- Documented that agenda month height follows the rendered week rows and can
+  therefore vary between months and caller-supplied day-cell layouts.
+
+### ⚠️ Breaking changes
+- None.
+
+### Installation
+```swift
+.package(url: "https://github.com/q-chang/ezcalendar-ios", from: "2.0.3")
+```
+
 ## EZCalendar 2.0.2
 
 This release adds an optional configuration for the agenda calendar's

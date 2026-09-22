@@ -14,15 +14,16 @@ enum AgendaCoordinateSpace {
     static let list = "ez.agenda.list"
 }
 
-/// Natural, unclipped height of each month page's grid, keyed by page id.
-///
-/// Merged rather than overwritten, because several pages are on screen at once
-/// mid-swipe and each reports its own height.
-struct AgendaGridHeightKey: PreferenceKey {
-    static var defaultValue: [String: Double] { [:] }
+/// The measured height of each rendered week row, grouped by month page.
+/// Measuring rows individually avoids relying on a lazy pager's estimate of
+/// the complete month height.
+struct AgendaGridRowHeightKey: PreferenceKey {
+    static var defaultValue: [String: [String: Double]] { [:] }
 
-    static func reduce(value: inout [String: Double], nextValue: () -> [String: Double]) {
-        value.merge(nextValue()) { _, new in new }
+    static func reduce(value: inout [String: [String: Double]], nextValue: () -> [String: [String: Double]]) {
+        for (pageID, rows) in nextValue() {
+            value[pageID, default: [:]].merge(rows) { _, new in new }
+        }
     }
 }
 
@@ -37,17 +38,13 @@ struct AgendaHeaderOffsetKey: PreferenceKey {
 
 extension View {
 
-    /// Reports this view's natural height under `id`.
-    ///
-    /// Attached as a `background`, so measuring never influences the layout it
-    /// is measuring — the geometry reader inherits the size rather than
-    /// proposing one.
-    func measureGridHeight(id: String) -> some View {
+    /// Reports one week's natural height without imposing a size on the row.
+    func measureGridRowHeight(pageID: String, rowID: String) -> some View {
         background(
             GeometryReader { proxy in
                 Color.clear.preference(
-                    key: AgendaGridHeightKey.self,
-                    value: [id: proxy.size.height]
+                    key: AgendaGridRowHeightKey.self,
+                    value: [pageID: [rowID: proxy.size.height]]
                 )
             }
         )

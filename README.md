@@ -62,7 +62,7 @@ Or in `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/q-chang/ezcalendar-ios", from: "2.0.0")
+    .package(url: "https://github.com/q-chang/ezcalendar-ios", from: "2.0.3")
 ]
 ```
 
@@ -379,6 +379,10 @@ EZCalendarAgendaView(
 ```
 
 The longer initializer adds `titleViewContent`, `emptyDayViewContent` and `handleViewContent`.
+
+The monthly calendar measures each rendered week row and sizes its window from
+the complete month grid. A month can therefore have 4, 5, or 6 rows, and the
+height also follows the custom layout supplied by `dayItemViewContent`.
 
 **Behavior**
 
