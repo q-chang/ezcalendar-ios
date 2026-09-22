@@ -30,6 +30,23 @@ struct AgendaPageTests {
         #expect(pages[0].firstDate == Fixture.date(2026, 7, 1))
     }
 
+    @Test("A six-row month retains its final trailing week")
+    func sixRowMonthContainsTrailingWeek() {
+        let pages = Fixture.monthPages([(8, 2026)])
+
+        #expect(pages.count == 1)
+        #expect(pages[0].weeks.count == 6)
+        #expect(pages[0].weeks[5].calendarDays.map(\.date) == [
+            Fixture.date(2026, 8, 30),
+            Fixture.date(2026, 8, 31),
+            Fixture.date(2026, 9, 1),
+            Fixture.date(2026, 9, 2),
+            Fixture.date(2026, 9, 3),
+            Fixture.date(2026, 9, 4),
+            Fixture.date(2026, 9, 5)
+        ])
+    }
+
     @Test("A month page's id ignores events, so attaching data cannot move the pager")
     func monthPageIDIsStableAcrossEventChanges() {
         let bare = CalendarMonth(month: 7, year: 2026)

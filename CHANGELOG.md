@@ -6,17 +6,10 @@ authoritative package version.
 ## Unreleased
 
 ### ✨ Features
-- Added `.pullToRefresh(minimumDisplayDuration:indicator:onRefresh:)` to
-  `EZCalendarAgendaView`. It recognises downward vertical pulls only in the
-  calendar area, keeps horizontal paging independent, and exposes caller-owned
-  refresh visuals through `EZCalendarAgendaRefreshContext`.
 
 ### 🐛 Fixes
-- 
 
 ### 📚 Documentation
-- Documented agenda pull-to-refresh, its refresh phases, and the caller-owned
-  async loading lifecycle in the README.
 
 ### ⚠️ Breaking changes
 - None.
@@ -24,6 +17,39 @@ authoritative package version.
 ### Installation
 ```swift
 .package(url: "https://github.com/q-chang/ezcalendar-ios", from: "NEXT_VERSION")
+```
+
+## EZCalendar 2.1.0
+
+This minor release adds opt-in pull-to-refresh for agenda calendars while
+preserving caller-owned visuals and data loading.
+
+### ✨ Features
+- Added `.pullToRefresh(minimumDisplayDuration:indicator:onRefresh:)` to
+  `EZCalendarAgendaView`. It recognises downward vertical pulls only in the
+  calendar area, keeps horizontal paging independent, and exposes caller-owned
+  refresh visuals through `EZCalendarAgendaRefreshContext`. The indicator is
+  inserted above `titleViewContent`, pushing the header and calendar down.
+
+### 🐛 Fixes
+- Restored lazy monthly paging while keeping its viewport synchronized with the
+  measured visible month. Four-, five-, and six-row months render their complete
+  grids; a sixth week no longer appears as an empty area below the fifth row.
+
+### ✨ Demo app
+- Added an interactive agenda pull-to-refresh example with a caller-styled
+  header indicator and simulated asynchronous reload.
+
+### 📚 Documentation
+- Documented agenda pull-to-refresh, its refresh phases, and the caller-owned
+  async loading lifecycle, including its placement above `titleViewContent`.
+
+### ⚠️ Breaking changes
+- None.
+
+### Installation
+```swift
+.package(url: "https://github.com/q-chang/ezcalendar-ios", from: "2.1.0")
 ```
 
 ## EZCalendar 2.0.3

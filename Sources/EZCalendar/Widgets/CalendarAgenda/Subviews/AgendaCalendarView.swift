@@ -160,9 +160,13 @@ struct AgendaCalendarView<TitleView: View, WeekdayItemView: View, DayItemView: V
         .scrollTargetBehavior(.viewAligned)
         .scrollPosition(id: $viewModel.visibleMonthID)
         .scrollIndicators(.never)
-        // Take the content's own height rather than the proposal, so the window
-        // above can clip a grid that is measuring itself at full size.
-        .fixedSize(horizontal: false, vertical: true)
+        // Do not apply `.fixedSize(vertical: true)` here. A horizontal
+        // `ScrollView` then keeps its initial five-row internal viewport even
+        // when the outer window grows for a six-row month; a wrapping frame
+        // merely exposes blank space below that clipped viewport. Giving the
+        // scroll view the measured window height directly lets its own clipping
+        // region grow with the visible page.
+        .frame(height: calendarWindowHeight, alignment: .top)
         .onChange(of: viewModel.visibleMonthID) { _, id in
             viewModel.pagerScrolled(to: id)
         }
