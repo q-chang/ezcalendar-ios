@@ -226,6 +226,7 @@ public struct EZCalendarAgendaView<
     private var collapseThreshold: Double = 78
     private var collapseVelocityThreshold: Double = 350
     private var collapseAnimation: Animation = .easeOut(duration: 0.3)
+    private var collapseOnDaySelection = true
 
     public init(
         withCalendar calendar: Calendar,
@@ -333,7 +334,7 @@ public struct EZCalendarAgendaView<
             .contentShape(Rectangle())
             .onTapGesture {
                 guard let date = day.date else { return }
-                viewModel.selectDay(date)
+                viewModel.selectDay(date, collapseOnSelection: collapseOnDaySelection)
             }
     }
 
@@ -451,6 +452,14 @@ public struct EZCalendarAgendaView<
     public func collapseAnimation(_ animation: Animation) -> Self {
         var view = self
         view.collapseAnimation = animation
+        return view
+    }
+
+    /// Whether selecting a day in the monthly calendar collapses it to weekly mode.
+    /// Enabled by default to preserve the original interaction.
+    public func collapseOnDaySelection(_ enabled: Bool) -> Self {
+        var view = self
+        view.collapseOnDaySelection = enabled
         return view
     }
 }
