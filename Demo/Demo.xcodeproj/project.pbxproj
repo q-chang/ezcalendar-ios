@@ -267,6 +267,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "\"Demo/Preview Content\"";
+				DEVELOPMENT_TEAM = 8V2SYTBM4P;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
@@ -304,6 +305,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "\"Demo/Preview Content\"";
+				DEVELOPMENT_TEAM = 8V2SYTBM4P;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
@@ -358,7 +360,7 @@
 /* Begin XCLocalSwiftPackageReference section */
 		A76336F52E8519900034222E /* XCLocalSwiftPackageReference ".." */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = "..";
+			relativePath = ..;
 		};
 /* End XCLocalSwiftPackageReference section */
 
