@@ -42,8 +42,8 @@ final class DemoAgendaViewModel: ObservableObject {
 
         // Three months either side of today: enough to page through, small
         // enough that the whole agenda list stays quick to rebuild.
-        self.startDate = calendar.date(byAdding: .month, value: -3, to: today) ?? today
-        self.endDate = calendar.date(byAdding: .month, value: 3, to: today) ?? today
+        self.startDate = calendar.date(byAdding: .month, value: -6, to: today) ?? today
+        self.endDate = calendar.date(byAdding: .month, value: 12, to: today) ?? today
 
         self.calendarMonths = EZCalendarHelper.generateCalendarMonths(
             startDate: startDate,

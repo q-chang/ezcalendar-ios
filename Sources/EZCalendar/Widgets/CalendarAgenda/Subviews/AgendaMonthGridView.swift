@@ -55,12 +55,10 @@ struct AgendaMonthGridView<DayItemView: View>: View {
                     dayItemViewContent: dayItemViewContent
                 )
                 .opacity(viewModel.rowOpacity(rowIndex: index, in: page))
+                .measureGridRowHeight(pageID: page.id, rowID: week.uuid)
             }
         }
         .background(gridLineColor)
-        // Measured *after* the background so the reported height is exactly the
-        // height the parent's window has to clip to.
-        .measureGridHeight(id: page.id)
         .offset(y: viewModel.gridOffset(for: page))
     }
 }
