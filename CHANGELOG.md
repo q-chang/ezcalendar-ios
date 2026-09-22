@@ -6,13 +6,17 @@ authoritative package version.
 ## Unreleased
 
 ### ✨ Features
-- 
+- Added `.pullToRefresh(minimumDisplayDuration:indicator:onRefresh:)` to
+  `EZCalendarAgendaView`. It recognises downward vertical pulls only in the
+  calendar area, keeps horizontal paging independent, and exposes caller-owned
+  refresh visuals through `EZCalendarAgendaRefreshContext`.
 
 ### 🐛 Fixes
 - 
 
 ### 📚 Documentation
-- 
+- Documented agenda pull-to-refresh, its refresh phases, and the caller-owned
+  async loading lifecycle in the README.
 
 ### ⚠️ Breaking changes
 - None.

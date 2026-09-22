@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A710E98A306273130094AB32 /* EZCalendar in Frameworks */ = {isa = PBXBuildFile; productRef = A710E989306273130094AB32 /* EZCalendar */; };
 		A76336F72E8519900034222E /* EZCalendar in Frameworks */ = {isa = PBXBuildFile; productRef = A76336F62E8519900034222E /* EZCalendar */; };
 /* End PBXBuildFile section */
 
@@ -29,6 +30,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A76336F72E8519900034222E /* EZCalendar in Frameworks */,
+				A710E98A306273130094AB32 /* EZCalendar in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -81,6 +83,7 @@
 			name = Demo;
 			packageProductDependencies = (
 				A76336F62E8519900034222E /* EZCalendar */,
+				A710E989306273130094AB32 /* EZCalendar */,
 			);
 			productName = Demo;
 			productReference = A75AE8BD2D33B2A40052BADA /* Demo.app */;
@@ -111,7 +114,7 @@
 			mainGroup = A75AE8B42D33B2A40052BADA;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				A76336F52E8519900034222E /* XCLocalSwiftPackageReference ".." */,
+				A710E988306273130094AB32 /* XCLocalSwiftPackageReference "../../ezcalendar-ios" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = A75AE8BE2D33B2A40052BADA /* Products */;
@@ -358,13 +361,17 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		A76336F52E8519900034222E /* XCLocalSwiftPackageReference ".." */ = {
+		A710E988306273130094AB32 /* XCLocalSwiftPackageReference "../../ezcalendar-ios" */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = ..;
+			relativePath = "../../ezcalendar-ios";
 		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		A710E989306273130094AB32 /* EZCalendar */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = EZCalendar;
+		};
 		A76336F62E8519900034222E /* EZCalendar */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = EZCalendar;

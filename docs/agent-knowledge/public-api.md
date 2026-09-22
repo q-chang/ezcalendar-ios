@@ -20,9 +20,10 @@ as an external module — not by reading modifiers.
 | `EZCalendarItemView.gridLineColor(_:)` | ❌ **internal** |
 | `EZCalendarWeekdayHeaderView` | ⚠️ type public, **`init` internal** |
 | `EZCalendarHorizontalPagingView` + `init` + `.gridLineColor` + `.weekdayScrollable` | ✅ |
-| `EZCalendarAgendaView` + both `init`s + `.gridLineColor` + `.collapseThreshold` + `.collapseAnimation` + `.collapseOnDaySelection` | ✅ |
+| `EZCalendarAgendaView` + both `init`s + `.gridLineColor` + `.collapseThreshold` + `.collapseAnimation` + `.collapseOnDaySelection` + `.pullToRefresh` | ✅ |
 | `EZCalendarAgendaMode`, `EZCalendarAgendaPaging` | ✅ |
-| `EZCalendarDayContext`, `EZCalendarAgendaSection`, `EZCalendarAgendaTitleContext` | ✅ read only — received, never constructed |
+| `EZCalendarDayContext`, `EZCalendarAgendaSection`, `EZCalendarAgendaTitleContext`, `EZCalendarAgendaRefreshContext` | ✅ read only — received, never constructed |
+| `EZCalendarAgendaRefreshPhase` | ✅ |
 | `Date` extension (`.from`, `.get`, `.startOfMonth`, `.toString`) | ❌ **internal** |
 
 ## The three that bite
@@ -123,6 +124,7 @@ as `CalendarDay`: their initializers are internal on purpose.
 | `EZCalendarDayContext` | the `dayItemViewContent` closure |
 | `EZCalendarAgendaSection<Event>` | the `listHeaderViewContent` closure |
 | `EZCalendarAgendaTitleContext` | the `titleViewContent` closure |
+| `EZCalendarAgendaRefreshContext` | the `.pullToRefresh` indicator closure |
 
 Note that `EZCalendarAgendaView` never needs the internal `Date` extension in a
 caller's code: `EZCalendarDayContext.date` is a plain `Date?`, and the README
