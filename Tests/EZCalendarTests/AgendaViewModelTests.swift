@@ -67,6 +67,19 @@ struct AgendaViewModelTests {
         #expect(viewModel.mode == .weekly)
     }
 
+    @Test("Tapping a day can keep a monthly calendar expanded")
+    func tapCanKeepMonthlyMode() {
+        let viewModel = makeViewModel(mode: .monthly)
+
+        viewModel.selectDay(
+            Fixture.dateTime(2030, 7, 22, 9, 30),
+            collapseOnSelection: false
+        )
+
+        #expect(viewModel.selection == Fixture.date(2030, 7, 22))
+        #expect(viewModel.mode == .monthly)
+    }
+
     @Test("Tapping a day in .weekly selects it and leaves the mode alone")
     func tapInWeeklyKeepsTheMode() {
         let viewModel = makeViewModel(mode: .weekly)

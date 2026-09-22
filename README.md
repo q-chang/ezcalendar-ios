@@ -384,7 +384,7 @@ The longer initializer adds `titleViewContent`, `emptyDayViewContent` and `handl
 
 | Interaction | Result |
 | --- | --- |
-| Tap a day | The list scrolls that day's sticky header to the top. In `.monthly` the tap also snaps the calendar to `.weekly`. |
+| Tap a day | The list scrolls that day's sticky header to the top. By default, tapping in `.monthly` also snaps the calendar to `.weekly`; use `.collapseOnDaySelection(false)` to keep it expanded. |
 | Scroll the list | Whichever sticky header is pinned at the top becomes the selected day; the calendar pages itself to follow. |
 | Drag the grab handle | The calendar tracks the finger, non-selected weeks fading as the grid closes. On release it commits if the drag passed `collapseThreshold` **or** was flicked faster than `collapseVelocityThreshold`, and springs back otherwise. |
 | Scroll the event list | Scrolls the list. It never changes the mode, in either direction, over-scroll included. |
@@ -401,6 +401,7 @@ Page it programmatically with `EZCalendarAgendaPaging.selection(paging:from:mode
 | `.collapseThreshold(_:)` | `78` | How far the grab handle must be dragged, on release, to commit a switch. |
 | `.collapseVelocityThreshold(_:)` | `350` | How fast it must be flicked (points/second) to commit regardless of distance. `0` disables the flick. |
 | `.collapseAnimation(_:)` | `.easeOut(duration: 0.3)` | How a released gesture settles. |
+| `.collapseOnDaySelection(_:)` | `true` | Whether tapping a day while in `.monthly` switches the calendar to `.weekly`. |
 
 > **Use `context.hasEvents`, not `context.day.hasEvents`.** The agenda buckets your events by *day*, so its flag works for events stamped at a real time and for padding days — neither of which `CalendarDay.hasEvents` handles. See limitation 2 below.
 
