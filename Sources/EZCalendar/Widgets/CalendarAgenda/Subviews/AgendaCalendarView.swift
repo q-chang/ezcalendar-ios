@@ -99,11 +99,10 @@ struct AgendaCalendarView<TitleView: View, WeekdayItemView: View, DayItemView: V
 
     private var monthPager: some View {
         ScrollView(.horizontal) {
-            // Use a regular HStack here so the visible month's complete natural
-            // height is resolved before the clipping window is measured. A
-            // LazyHStack may leave a six-row page with a stale five-row height
-            // when caller-provided day cells have custom sizing.
-            HStack(alignment: .top, spacing: 0) {
+            // Each visible month contains a non-lazy VStack of all its week
+            // rows, so row measurement stays complete. Keeping the page strip
+            // lazy avoids constructing every configured month during a swipe.
+            LazyHStack(alignment: .top, spacing: 0) {
                 ForEach(viewModel.monthPages) { page in
                     AgendaMonthGridView(
                         page: page,

@@ -168,6 +168,11 @@ final class EZCalendarAgendaViewModel: ObservableObject {
     /// change: the month grids come straight from `EZCalendarItemViewModel`, and
     /// the week set is a de-duplicated flattening of them.
     func rebuildPages(from months: [CalendarMonth]) {
+        // CalendarWeek identities are regenerated with the page data, so a
+        // previous row-height measurement is no longer valid. Let the visible
+        // page report its own rows again rather than briefly clipping to a
+        // stale height.
+        gridHeights = [:]
         monthPages = EZCalendarAgendaLogic.monthPages(from: months, calendar: calendar)
         weekPages = EZCalendarAgendaLogic.weekPages(from: monthPages, calendar: calendar)
     }
