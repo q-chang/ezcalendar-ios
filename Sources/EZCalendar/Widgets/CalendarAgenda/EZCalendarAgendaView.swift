@@ -202,6 +202,9 @@ public struct EZCalendarAgendaView<
     @Binding private var calendarMonths: [CalendarMonth]
 
     private let events: [Event]
+    /// Caller-owned revision for replacing event content whose stable ids and
+    /// dates do not change (for example, a job status refresh).
+    private let eventsRevision: Int
     private let eventDate: (Event) -> Date
 
     private let titleViewContent: (EZCalendarAgendaTitleContext) -> TitleView
@@ -238,6 +241,7 @@ public struct EZCalendarAgendaView<
         selectedDate: Binding<Date>,
         calendarMonths: Binding<[CalendarMonth]>,
         events: [Event],
+        eventsRevision: Int = 0,
         eventDate: @escaping (Event) -> Date,
         @ViewBuilder titleViewContent: @escaping (EZCalendarAgendaTitleContext) -> TitleView,
         @ViewBuilder weekdayItemViewContent: @escaping (String) -> WeekdayItemView,
@@ -254,6 +258,7 @@ public struct EZCalendarAgendaView<
         self._selectedDate = selectedDate
         self._calendarMonths = calendarMonths
         self.events = events
+        self.eventsRevision = eventsRevision
         self.eventDate = eventDate
         self.titleViewContent = titleViewContent
         self.weekdayItemViewContent = weekdayItemViewContent
@@ -295,7 +300,9 @@ public struct EZCalendarAgendaView<
                 scrollCommandReceived: viewModel.scrollCommandReceived,
                 visibleSectionChanged: viewModel.visibleSectionChanged,
                 listPositionSettled: viewModel.listPositionSettled,
+                listPositionFailed: viewModel.listPositionFailed,
                 sections: sections,
+                contentRevision: eventsRevision,
                 listHeaderViewContent: listHeaderViewContent,
                 eventItemViewContent: eventItemViewContent,
                 emptyDayViewContent: emptyDayViewContent,
@@ -306,9 +313,15 @@ public struct EZCalendarAgendaView<
         .onChange(of: calendarMonths) { _, months in
             viewModel.rebuildPages(from: months)
             rebuildSections()
+            viewModel.reanchorSelection()
         }
         .onChange(of: eventsFingerprint) { _, _ in
             rebuildSections()
+            viewModel.reanchorSelection()
+        }
+        .onChange(of: eventsRevision) { _, _ in
+            rebuildSections()
+            viewModel.reanchorSelection()
         }
         // MARK: Binding mirrors
         //
