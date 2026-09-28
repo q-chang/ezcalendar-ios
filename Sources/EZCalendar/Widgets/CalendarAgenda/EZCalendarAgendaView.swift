@@ -287,7 +287,10 @@ public struct EZCalendarAgendaView<
             )
 
             AgendaListView(
-                viewModel: viewModel,
+                scrollRequest: $viewModel.scrollRequest,
+                handleDragChanged: viewModel.handleDragChanged,
+                handleDragEnded: viewModel.handleDragEnded,
+                headerOffsetsChanged: viewModel.headerOffsetsChanged,
                 sections: sections,
                 listHeaderViewContent: listHeaderViewContent,
                 eventItemViewContent: eventItemViewContent,

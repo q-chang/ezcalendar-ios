@@ -174,6 +174,7 @@ struct AgendaCalendarView<TitleView: View, WeekdayItemView: View, DayItemView: V
             for (pageID, rows) in rowHeights {
                 let height = rows.values.reduce(0, +)
                     + viewModel.gridSpacing * Double(max(0, rows.count - 1))
+                guard viewModel.gridHeights[pageID] != height else { continue }
                 viewModel.gridHeights[pageID] = height
             }
         }

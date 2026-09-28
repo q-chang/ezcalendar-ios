@@ -34,7 +34,11 @@ import SwiftUI
 /// `EZCalendarAgendaLogic.topMostSectionID(headerOffsets:topInset:)`.
 struct AgendaListView<Event: Identifiable, ListHeaderView: View, EventItemView: View, EmptyDayView: View, HandleView: View>: View {
 
-    @ObservedObject var viewModel: EZCalendarAgendaViewModel
+    @Binding var scrollRequest: AgendaScrollRequest?
+
+    let handleDragChanged: (Double) -> Void
+    let handleDragEnded: (Double, Double) -> Void
+    let headerOffsetsChanged: ([AgendaHeaderOffset]) -> Void
 
     let sections: [EZCalendarAgendaSection<Event>]
 
@@ -49,7 +53,7 @@ struct AgendaListView<Event: Identifiable, ListHeaderView: View, EventItemView: 
             list
         }
         .onPreferenceChange(AgendaHeaderOffsetKey.self) { offsets in
-            viewModel.headerOffsetsChanged(offsets)
+            headerOffsetsChanged(offsets)
         }
     }
 
@@ -78,13 +82,10 @@ struct AgendaListView<Event: Identifiable, ListHeaderView: View, EventItemView: 
             .gesture(
                 DragGesture(minimumDistance: 1, coordinateSpace: .global)
                     .onChanged { value in
-                        viewModel.handleDragChanged(translation: value.translation.height)
+                        handleDragChanged(value.translation.height)
                     }
                     .onEnded { value in
-                        viewModel.handleDragEnded(
-                            translation: value.translation.height,
-                            velocity: value.velocity.height
-                        )
+                        handleDragEnded(value.translation.height, value.velocity.height)
                     }
             )
     }
@@ -114,7 +115,7 @@ struct AgendaListView<Event: Identifiable, ListHeaderView: View, EventItemView: 
             }
             .coordinateSpace(.named(AgendaCoordinateSpace.list))
             .scrollIndicators(.never)
-            .onChange(of: viewModel.scrollRequest) { _, request in
+            .onChange(of: scrollRequest) { _, request in
                 guard let request else { return }
 
                 // Deliberately *not* `collapseAnimation`: that one is the
@@ -130,7 +131,7 @@ struct AgendaListView<Event: Identifiable, ListHeaderView: View, EventItemView: 
 
                 // Clear the request so selecting the same day twice scrolls
                 // twice — `onChange` only fires on a *changed* value.
-                viewModel.scrollRequest = nil
+                scrollRequest = nil
             }
         }
     }
