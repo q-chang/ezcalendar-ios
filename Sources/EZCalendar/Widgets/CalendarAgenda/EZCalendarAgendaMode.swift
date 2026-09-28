@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import SwiftUI
 
 /**
  # 🗓️ Display mode for `EZCalendarAgendaView`
@@ -43,5 +44,23 @@ public enum EZCalendarAgendaMode: String, Hashable, Sendable, CaseIterable {
         case .monthly: return 0
         case .weekly: return 1
         }
+    }
+}
+
+
+private struct EZCalendarAgendaDisplayModeKey: EnvironmentKey {
+    static let defaultValue: EZCalendarAgendaMode = .monthly
+}
+
+public extension EnvironmentValues {
+    /// The layout mode of the pager currently rendering this day cell.
+    ///
+    /// During a month-to-week transition, the public mode binding has already
+    /// changed to `.weekly`, while the month grid remains on screen. Day cells
+    /// should use this value for layout so their row heights remain stable until
+    /// the week pager replaces the month pager.
+    var ezCalendarAgendaDisplayMode: EZCalendarAgendaMode {
+        get { self[EZCalendarAgendaDisplayModeKey.self] }
+        set { self[EZCalendarAgendaDisplayModeKey.self] = newValue }
     }
 }

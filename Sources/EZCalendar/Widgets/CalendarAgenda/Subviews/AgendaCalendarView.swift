@@ -174,6 +174,7 @@ struct AgendaCalendarView<TitleView: View, WeekdayItemView: View, DayItemView: V
             for (pageID, rows) in rowHeights {
                 let height = rows.values.reduce(0, +)
                     + viewModel.gridSpacing * Double(max(0, rows.count - 1))
+                guard viewModel.gridHeights[pageID] != height else { continue }
                 viewModel.gridHeights[pageID] = height
             }
         }
@@ -197,6 +198,9 @@ struct AgendaCalendarView<TitleView: View, WeekdayItemView: View, DayItemView: V
         .scrollPosition(id: $viewModel.visibleWeekID)
         .scrollIndicators(.never)
         .fixedSize(horizontal: false, vertical: true)
+        .onAppear {
+            viewModel.weekPagerAppeared()
+        }
         .onChange(of: viewModel.visibleWeekID) { _, id in
             viewModel.pagerScrolled(to: id)
         }

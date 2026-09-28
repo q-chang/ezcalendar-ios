@@ -59,6 +59,7 @@ struct AgendaMonthGridView<DayItemView: View>: View {
             }
         }
         .background(gridLineColor)
+        .environment(\.ezCalendarAgendaDisplayMode, .monthly)
         .offset(y: viewModel.gridOffset(for: page))
     }
 }
@@ -81,5 +82,6 @@ struct AgendaWeekPageView<DayItemView: View>: View {
             dayItemViewContent: dayItemViewContent
         )
         .background(gridLineColor)
+        .environment(\.ezCalendarAgendaDisplayMode, .weekly)
     }
 }

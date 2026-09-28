@@ -19,6 +19,43 @@ authoritative package version.
 .package(url: "https://github.com/q-chang/ezcalendar-ios", from: "NEXT_VERSION")
 ```
 
+## EZCalendar 2.2.0
+
+This release makes the agenda list's iOS scroll positioning and sticky
+headers exact and reliable, fixing a jump that previously landed one day
+short and a sticky header that could scroll away with its own content.
+
+### 🐛 Fixes
+- `EZCalendarAgendaView`'s agenda list, on iOS, now scrolls to a selected day
+  and shows the sticky header for whichever day is at the top of the list
+  correctly and reliably. It previously undershot by one day (the previous
+  day's header stayed pinned at the top) using SwiftUI's native
+  `scrollPosition(id:anchor:)`, and continued to fail once, then twice, when
+  ported to a `UICollectionView` bridge whose sticky headers never actually
+  stuck on device. The agenda list on iOS is now a `UITableView` bridge —
+  `Subviews/AgendaTableView.swift` — which sticks section headers by
+  default and positions exactly, since `UITableView` precomputes every row's
+  offset instead of estimating it. macOS is unaffected: it keeps the
+  original SwiftUI-native `ScrollView`/`LazyVStack` implementation, since
+  `UIKit` does not exist there.
+
+### 📚 Documentation
+- Added landmines for the diffable-data-source pitfalls this uncovered — see
+  [landmines.md #14–16](docs/agent-knowledge/landmines.md).
+
+### ⚠️ Breaking changes
+- `EZCalendarAgendaView`'s `Event` generic parameter now also requires
+  `Event.ID: Sendable`, needed for the `UITableView`/`NSDiffableDataSourceSnapshot`
+  bridge under Swift 6 strict concurrency. Every realistic `Identifiable.ID`
+  (`String`, `UUID`, `Int`, ...) already conforms, so this is very unlikely to
+  affect an existing caller — but it is a new constraint on public API, not
+  purely an internal change.
+
+### Installation
+```swift
+.package(url: "https://github.com/q-chang/ezcalendar-ios", from: "2.2.0")
+```
+
 ## EZCalendar 2.1.0
 
 This minor release adds opt-in pull-to-refresh for agenda calendars while

@@ -32,9 +32,20 @@ import SwiftUI
 /// one is pinned at the top is, by definition, the day the user is looking at —
 /// so that is the day the calendar selects. See
 /// `EZCalendarAgendaLogic.topMostSectionID(headerOffsets:topInset:)`.
-struct AgendaListView<Event: Identifiable, ListHeaderView: View, EventItemView: View, EmptyDayView: View, HandleView: View>: View {
+struct AgendaListView<Event: Identifiable, ListHeaderView: View, EventItemView: View, EmptyDayView: View, HandleView: View>: View where Event.ID: Sendable {
 
-    @ObservedObject var viewModel: EZCalendarAgendaViewModel
+    @Binding var scrollRequest: AgendaScrollRequest?
+    #if !os(iOS)
+    @State private var scrollPosition: String?
+    @State private var listOpacity = 1.0
+    #endif
+
+    let handleDragChanged: (Double) -> Void
+    let handleDragEnded: (Double, Double) -> Void
+    let sectionAppeared: (String) -> Void
+    let scrollCommandReceived: (AgendaScrollRequest) -> Void
+    let visibleSectionChanged: (String?) -> Void
+    let listPositionSettled: () -> Void
 
     let sections: [EZCalendarAgendaSection<Event>]
 
@@ -47,9 +58,6 @@ struct AgendaListView<Event: Identifiable, ListHeaderView: View, EventItemView: 
         VStack(spacing: 0) {
             grabHandle
             list
-        }
-        .onPreferenceChange(AgendaHeaderOffsetKey.self) { offsets in
-            viewModel.headerOffsetsChanged(offsets)
         }
     }
 
@@ -78,25 +86,51 @@ struct AgendaListView<Event: Identifiable, ListHeaderView: View, EventItemView: 
             .gesture(
                 DragGesture(minimumDistance: 1, coordinateSpace: .global)
                     .onChanged { value in
-                        viewModel.handleDragChanged(translation: value.translation.height)
+                        handleDragChanged(value.translation.height)
                     }
                     .onEnded { value in
-                        viewModel.handleDragEnded(
-                            translation: value.translation.height,
-                            velocity: value.velocity.height
-                        )
+                        handleDragEnded(value.translation.height, value.velocity.height)
                     }
             )
     }
 
     private var list: some View {
-        ScrollViewReader { proxy in
+        #if os(iOS)
+        // `UITableView` positions exactly and sticks section headers by
+        // default — see `AgendaTableView`'s own documentation for why both
+        // the SwiftUI-native `scrollPosition(id:anchor:)` implementation and
+        // a `UICollectionView` bridge (two different, correctly-configured
+        // sticky-header layouts) still weren't trustworthy. SwiftUI still
+        // renders every pixel; this only owns identity, layout and
+        // positioning.
+        AgendaTableView(
+            scrollRequest: $scrollRequest,
+            sections: sections,
+            sectionAppeared: sectionAppeared,
+            scrollCommandReceived: scrollCommandReceived,
+            visibleSectionChanged: visibleSectionChanged,
+            listPositionSettled: listPositionSettled,
+            listHeaderViewContent: listHeaderViewContent,
+            eventItemViewContent: eventItemViewContent,
+            emptyDayViewContent: emptyDayViewContent
+        )
+        .task(id: scrollRequest?.token) {
+            // The collection view already positioned itself, synchronously
+            // and exactly, inside `updateUIView` before this task's first
+            // line runs. This only owns clearing the one-shot request —
+            // deferred to a `.task` rather than done inline, so it never
+            // mutates the binding mid-view-update.
+            guard let request = scrollRequest else { return }
+            await Task.yield()
+            guard !Task.isCancelled, scrollRequest?.token == request.token else { return }
+            scrollRequest = nil
+        }
+        #else
+        GeometryReader { geometry in
             ScrollView {
                 LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
                     ForEach(sections) { section in
                         Section {
-                            // Every day in range has a section, so a day with
-                            // nothing scheduled still has something to scroll to.
                             if section.isEmpty {
                                 emptyDayViewContent(section.date)
                             } else {
@@ -106,32 +140,69 @@ struct AgendaListView<Event: Identifiable, ListHeaderView: View, EventItemView: 
                             }
                         } header: {
                             listHeaderViewContent(section)
-                                .id(section.id)
-                                .measureHeaderOffset(id: section.id)
+                        }
+                        // A section is one semantic day. Declaring it as a
+                        // scroll target lets SwiftUI resolve distant lazy items
+                        // from the layout, rather than a transient reader cache.
+                        .id(section.id)
+                        .onAppear {
+                            sectionAppeared(section.id)
                         }
                     }
+
+                    Color.clear.frame(height: geometry.size.height)
                 }
+                .scrollTargetLayout()
             }
+            .scrollPosition(id: $scrollPosition, anchor: .top)
             .coordinateSpace(.named(AgendaCoordinateSpace.list))
             .scrollIndicators(.never)
-            .onChange(of: viewModel.scrollRequest) { _, request in
-                guard let request else { return }
+            // Programmatic day changes are content replacements, never visible
+            // scroll animations. Keep inherited calendar animations from
+            // affecting the scroll container itself.
+            .transaction { transaction in
+                transaction.animation = nil
+                transaction.disablesAnimations = true
+            }
+            .opacity(listOpacity)
+            .onChange(of: scrollPosition) { _, id in
+                visibleSectionChanged(id)
+            }
+            .task(id: scrollRequest?.token) {
+                guard let request = scrollRequest else { return }
+                await Task.yield()
+                guard !Task.isCancelled else { return }
 
-                // Deliberately *not* `collapseAnimation`: that one is the
-                // caller's, and a slow value there would leave the list still
-                // travelling long after any sync latch could reasonably wait.
-                if request.animated {
-                    withAnimation(.easeOut(duration: 0.25)) {
-                        proxy.scrollTo(request.id, anchor: .top)
-                    }
-                } else {
-                    proxy.scrollTo(request.id, anchor: .top)
+                scrollCommandReceived(request)
+
+                // Hide the unavoidable lazy-layout relocation. The user sees a
+                // stable list fade to its new top section, never rows moving
+                // through the viewport.
+                var immediate = Transaction()
+                immediate.animation = nil
+                immediate.disablesAnimations = true
+                withTransaction(immediate) {
+                    listOpacity = 0
+                    scrollPosition = request.id
                 }
 
-                // Clear the request so selecting the same day twice scrolls
-                // twice — `onChange` only fires on a *changed* value.
-                viewModel.scrollRequest = nil
+                try? await Task.sleep(for: .milliseconds(180))
+                guard !Task.isCancelled else { return }
+
+                // Only now has the hidden scroll had a real layout pass to
+                // land on. Reported positions before this point are the
+                // lazy layout's own estimate settling, not a user scroll.
+                listPositionSettled()
+
+                withAnimation(.easeOut(duration: 0.16)) {
+                    listOpacity = 1
+                }
+
+                if scrollRequest?.token == request.token {
+                    scrollRequest = nil
+                }
             }
         }
+        #endif
     }
 }
