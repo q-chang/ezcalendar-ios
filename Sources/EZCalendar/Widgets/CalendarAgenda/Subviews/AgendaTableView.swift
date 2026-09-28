@@ -8,6 +8,16 @@
 #if os(iOS)
 import SwiftUI
 import UIKit
+import OSLog
+
+/// Diagnostic logger for `AgendaTableView`'s own positioning internals — same
+/// subsystem/category as `EZCalendarAgendaViewModel.syncLogger` so a single
+/// `AgendaSync` console filter shows both sides of a scroll transaction
+/// (the view model's intent and the table view's actual verification loop).
+private let agendaTableDiagnosticsLogger = Logger(
+    subsystem: "com.ezcalendar",
+    category: "AgendaSync"
+)
 
 /// The exact-positioning, reliably-sticky replacement for both the
 /// SwiftUI-native list and the `UICollectionView` bridge that preceded it.
@@ -56,6 +66,8 @@ struct AgendaTableView<
     let scrollCommandReceived: (AgendaScrollRequest) -> Void
     let visibleSectionChanged: (String?) -> Void
     let listPositionSettled: () -> Void
+    let listPositionFailed: () -> Void
+    let contentRevision: Int
 
     let listHeaderViewContent: (EZCalendarAgendaSection<Event>) -> ListHeaderView
     let eventItemViewContent: (Event) -> EventItemView
@@ -67,7 +79,20 @@ struct AgendaTableView<
         tableView.separatorStyle = .none
         tableView.showsVerticalScrollIndicator = false
         tableView.rowHeight = UITableView.automaticDimension
-        tableView.estimatedRowHeight = 60
+        // A flat `60` was the real cause of the cold-open landing far short
+        // of today (see `verify-attempt` log lines: `landedIndex` well below
+        // `targetIndex`, every time). One row is a full event card — title,
+        // optional subtitle, location line, padding — realistically
+        // 120-180pt, not 60. UITableView computes `scrollToRow`'s target
+        // offset from the *cumulative estimated* height of every skipped
+        // row, and never corrects that estimate for rows that stay
+        // off-screen; a low flat estimate is a large, systematic, one-
+        // directional undershoot for any jump of more than a few days, not
+        // random noise the bounded verify/retry loop below can fully absorb.
+        // 140 is a coarse, tunable heuristic — closer to real content than
+        // 60, not a claim of exact rendered height (the package cannot see
+        // inside the caller's `Event`-driven content by design).
+        tableView.estimatedRowHeight = 140
         tableView.sectionHeaderTopPadding = 0
         tableView.sectionHeaderHeight = UITableView.automaticDimension
         tableView.estimatedSectionHeaderHeight = 44
@@ -99,12 +124,15 @@ struct AgendaTableView<
     /// clamps the offset once content runs out, so the target would land
     /// short through no fault of the positioning call itself.
     private final class TrailingInsetTableView: UITableView {
+        var didLayout: (() -> Void)?
+
         override func layoutSubviews() {
             super.layoutSubviews()
             let desired = bounds.height
             if abs(contentInset.bottom - desired) > 1 {
                 contentInset.bottom = desired
             }
+            didLayout?()
         }
     }
 
@@ -116,11 +144,12 @@ struct AgendaTableView<
         coordinator.sectionAppeared = sectionAppeared
         coordinator.visibleSectionChangedHandler = visibleSectionChanged
 
-        coordinator.applySections(sections)
+        coordinator.applySections(sections, contentRevision: contentRevision)
         coordinator.handleScrollRequest(
             scrollRequest,
             scrollCommandReceived: scrollCommandReceived,
-            listPositionSettled: listPositionSettled
+            listPositionSettled: listPositionSettled,
+            listPositionFailed: listPositionFailed
         )
     }
 
@@ -157,7 +186,8 @@ struct AgendaTableView<
         var visibleSectionChangedHandler: ((String?) -> Void)?
 
         private(set) var sections: [EZCalendarAgendaSection<Event>] = []
-        private var sectionFingerprint: [String] = []
+        private var sectionFingerprint: Int?
+        private var appliedContentRevision: Int?
 
         private weak var tableView: UITableView?
         private var dataSource: UITableViewDiffableDataSource<String, RowID>?
@@ -165,10 +195,95 @@ struct AgendaTableView<
         private var lastHandledScrollToken: UUID?
         private var lastReportedSectionID: String?
         private var isProgrammaticScroll = false
+        private var pendingScrollRequest: AgendaScrollRequest?
+        private var pendingScrollCommandReceived: ((AgendaScrollRequest) -> Void)?
+        private var pendingListPositionSettled: (() -> Void)?
+        private var pendingListPositionFailed: (() -> Void)?
+        private var pendingScrollPhase: PendingScrollPhase = .awaitingLayout
+        private var pendingScrollVerificationAttempts = 0
+        private var hasAcknowledgedPendingScrollCommand = false
+        private var hasAppliedFinalScrollRecovery = false
+        private var isPendingScrollScheduled = false
+        private var hasRevealedInitialContent = false
+
+        private enum PendingScrollPhase {
+            case awaitingLayout
+            case verifying
+        }
+
+        // 4 was not enough: device logs showed the loop exhausting and
+        // falling through to `applyFinalScrollRecovery` — itself also
+        // `rect(forSection:)`/estimate-based — before nearby rows had been
+        // measured enough times to converge, landing on a different wrong
+        // day each run (10th, then 26th, then 16th) depending on exactly
+        // which rows happened to get measured within 4 passes. Each attempt
+        // is cheap (`reloadData()` + `scrollToRow`, table is hidden via
+        // `isHidden` the whole time — see `attach(to:)`), so a much larger
+        // bound costs latency, not correctness, and only the cold-open
+        // transaction (a potentially long jump from wherever the table
+        // defaults to) is likely to ever need many of them.
+        private let maximumScrollVerificationAttempts = 20
 
         func attach(to tableView: UITableView) {
             self.tableView = tableView
             self.dataSource = makeDataSource(for: tableView)
+            (tableView as? TrailingInsetTableView)?.didLayout = { [weak self] in
+                self?.schedulePendingScrollAfterLayout()
+            }
+
+            // Cold-open fix (2026-09-28): a freshly created `UITableView` is on
+            // screen the instant SwiftUI inserts it, at contentOffset (0, 0) —
+            // i.e. showing whatever section happens to be first in the range,
+            // not today. Positioning is not synchronous with mount: the first
+            // `scrollToRow` has to wait for `handleScrollRequest` ->
+            // `schedulePendingScrollAfterLayout` -> a `DispatchQueue.main.async`
+            // hop gated on `tableView.window != nil` and non-zero bounds, and
+            // this device repro measured ~800ms and two full request/verify
+            // transactions before the first `position-arrived`. The removed
+            // alpha-fade (see AGENDA_CALENDAR_HANDOFF.md, "no fade either")
+            // was covering exactly this window before it was taken out on the
+            // assumption that `scrollToRow` positions synchronously — that
+            // assumption is false for the very first frame specifically.
+            //
+            // This hides only the initial default-position frame(s), not any
+            // subsequent tap-driven jump: `revealInitialContentIfNeeded()`
+            // fires at most once per `Coordinator`, from whichever completion
+            // path finishes first (`completePendingScroll` or the clean-failure
+            // `failPendingScroll`), and every request after that already runs
+            // with the table view visible.
+            //
+            // `alpha = 0`, not `isHidden = true`: device logs showed the
+            // scroll positioning land byte-exact on the very first verify
+            // attempt (`landed` == `target`, `contentOffsetY` matching
+            // `targetRectMinY` to five decimals) while the screen still
+            // showed a stale day's header — correct geometry, wrong pixels.
+            // `isHidden` is documented to let a view's subtree skip/coalesce
+            // layout and rendering work; with several `reloadData()` +
+            // `UIHostingConfiguration` reconfigurations happening on the
+            // header/cells while hidden, unhiding could paint whichever
+            // reconfiguration happened to be the one SwiftUI last actually
+            // rendered, not necessarily the final, correct one. `alpha = 0`
+            // keeps the view fully live for rendering throughout — only its
+            // opacity changes, so there's nothing to fall stale.
+            tableView.alpha = 0
+            // Defensive-only fallback, not the primary mechanism: if some
+            // future change ever causes `selectionChanged()` to skip issuing
+            // a scroll request on a fresh mount (e.g. because the view model
+            // already believes `visibleListSectionID` matches the target),
+            // neither completion path above would ever fire and the list
+            // would stay invisible forever. One bounded, one-shot timer well
+            // past the slowest observed real completion (~800ms) prevents
+            // that failure mode without masking it as a false position — it
+            // only ever reveals, never reports or corrects a position.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+                self?.revealInitialContentIfNeeded()
+            }
+        }
+
+        private func revealInitialContentIfNeeded() {
+            guard !hasRevealedInitialContent else { return }
+            hasRevealedInitialContent = true
+            tableView?.alpha = 1
         }
 
         func section(at index: Int) -> EZCalendarAgendaSection<Event>? {
@@ -181,18 +296,21 @@ struct AgendaTableView<
 
         // MARK: Data
 
-        func applySections(_ sections: [EZCalendarAgendaSection<Event>]) {
+        func applySections(
+            _ sections: [EZCalendarAgendaSection<Event>],
+            contentRevision: Int
+        ) {
             self.sections = sections
 
-            // Comparing ids + event counts is cheap and catches every real
-            // rebuild. `EZCalendarAgendaView.body` re-evaluates on every frame
-            // of the collapse animation — this must be a no-op then, or the
-            // diffable data source would re-diff dozens of times a second.
-            let fingerprint = sections.flatMap { [$0.id, String($0.events.count)] }
-            guard fingerprint != sectionFingerprint else { return }
-            sectionFingerprint = fingerprint
-
             guard let dataSource else { return }
+
+            // UITableView retains the hosted SwiftUI configuration until the
+            // row is reconfigured. Compare every stable row identity and the
+            // caller's content revision, not only each section's row count.
+            let fingerprint = snapshotFingerprint(for: sections)
+            guard fingerprint != sectionFingerprint ||
+                    contentRevision != appliedContentRevision
+            else { return }
 
             var snapshot = NSDiffableDataSourceSnapshot<String, RowID>()
             snapshot.appendSections(sections.map(\.id))
@@ -209,6 +327,41 @@ struct AgendaTableView<
             // animatingDifferences:)` is not guaranteed synchronous even
             // with animations off.
             dataSource.applySnapshotUsingReloadData(snapshot)
+            sectionFingerprint = fingerprint
+            appliedContentRevision = contentRevision
+            if pendingScrollRequest != nil {
+                pendingScrollPhase = .awaitingLayout
+                pendingScrollVerificationAttempts = 0
+                hasAppliedFinalScrollRecovery = false
+            } else if let anchorID = lastReportedSectionID,
+                      let targetIndex = self.sectionIndex(for: anchorID),
+                      let tableView = self.tableView {
+                isProgrammaticScroll = true
+                tableView.scrollToRow(
+                    at: IndexPath(row: 0, section: targetIndex),
+                    at: .top,
+                    animated: false
+                )
+                tableView.layoutIfNeeded()
+                isProgrammaticScroll = false
+            }
+        }
+
+        private func snapshotFingerprint(
+            for sections: [EZCalendarAgendaSection<Event>]
+        ) -> Int {
+            var hasher = Hasher()
+            hasher.combine(sections.count)
+
+            for section in sections {
+                hasher.combine(section.id)
+                hasher.combine(section.events.count)
+                for event in section.events {
+                    hasher.combine(event.id)
+                }
+            }
+
+            return hasher.finalize()
         }
 
         private func makeDataSource(
@@ -274,68 +427,343 @@ struct AgendaTableView<
             sectionAppeared?(section.id)
         }
 
+        func tableView(_ tableView: UITableView, estimatedHeightForRowAt indexPath: IndexPath) -> CGFloat {
+            guard let section = section(at: indexPath.section) else { return 140 }
+            return section.isEmpty ? 72 : 140
+        }
+
+        func tableView(_ tableView: UITableView, estimatedHeightForHeaderInSection sectionIndex: Int) -> CGFloat {
+            return 44
+        }
+
         // MARK: Programmatic positioning
 
-        /// Applies a new `AgendaScrollRequest` exactly once per token.
-        /// Positioning here is synchronous and exact: `UITableView`
-        /// precomputes every row's offset the same way it always has, so
-        /// there is nothing to wait on and no undershoot to correct — and
-        /// therefore nothing to hide with a fade either. `scrollToRow(at:
-        /// animated: false)` jumps directly with no visible scroll through
-        /// intermediate days on its own.
+        /// Applies a new request only after its rendered top section has been
+        /// verified. UITableView uses estimated heights for offscreen hosted
+        /// rows, so returning from `scrollToRow` is a command acknowledgement,
+        /// not proof that the sticky header has settled on the requested day.
         func handleScrollRequest(
             _ request: AgendaScrollRequest?,
-            scrollCommandReceived: (AgendaScrollRequest) -> Void,
-            listPositionSettled: @escaping () -> Void
+            scrollCommandReceived: @escaping (AgendaScrollRequest) -> Void,
+            listPositionSettled: @escaping () -> Void,
+            listPositionFailed: @escaping () -> Void
         ) {
             guard let request, request.token != lastHandledScrollToken else { return }
-            lastHandledScrollToken = request.token
 
-            scrollCommandReceived(request)
+            if pendingScrollRequest?.token != request.token {
+                pendingScrollPhase = .awaitingLayout
+                pendingScrollVerificationAttempts = 0
+                hasAcknowledgedPendingScrollCommand = false
+                hasAppliedFinalScrollRecovery = false
+            }
+            pendingScrollRequest = request
+            pendingScrollCommandReceived = scrollCommandReceived
+            pendingListPositionSettled = listPositionSettled
+            pendingListPositionFailed = listPositionFailed
+            schedulePendingScrollAfterLayout()
+        }
 
-            guard let tableView,
+        private func schedulePendingScrollAfterLayout() {
+            guard pendingScrollRequest != nil, !isPendingScrollScheduled
+            else { return }
+            isPendingScrollScheduled = true
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.isPendingScrollScheduled = false
+                self.performPendingScrollIfPossible()
+            }
+        }
+
+        private func performPendingScrollIfPossible() {
+            guard let request = pendingScrollRequest,
+                  request.token != lastHandledScrollToken,
+                  let scrollCommandReceived = pendingScrollCommandReceived,
+                  let listPositionSettled = pendingListPositionSettled,
+                  let listPositionFailed = pendingListPositionFailed,
+                  let tableView,
+                  tableView.window != nil,
+                  tableView.bounds.height > 0,
                   let sectionIndex = sectionIndex(for: request.id)
             else { return }
 
-            let performScroll = { [weak self] in
-                guard let self else { return }
-                tableView.layoutIfNeeded()
+            guard prepareTableForPositioning(
+                tableView,
+                targetSectionIndex: sectionIndex
+            ) else { return }
 
-                // `sectionIndex` was computed from `self.sections`, which
-                // `applySections` keeps in lockstep with the diffable data
-                // source. Defensive: force one more synchronous reload and
-                // recheck before scrolling to a row that might not exist —
-                // `scrollToRow` crashes outright on an out-of-bounds target,
-                // as its `UICollectionView` counterpart did once already.
-                if sectionIndex >= tableView.numberOfSections ||
-                    tableView.numberOfRows(inSection: sectionIndex) == 0 {
-                    tableView.reloadData()
-                    tableView.layoutIfNeeded()
-                }
-
-                guard sectionIndex < tableView.numberOfSections,
-                      tableView.numberOfRows(inSection: sectionIndex) > 0
-                else { return }
-
-                self.isProgrammaticScroll = true
-                tableView.scrollToRow(
-                    at: IndexPath(row: 0, section: sectionIndex),
-                    at: .top,
-                    animated: false
+            switch pendingScrollPhase {
+            case .awaitingLayout:
+                issueScroll(
+                    to: sectionIndex,
+                    request: request,
+                    in: tableView,
+                    scrollCommandReceived: scrollCommandReceived
                 )
-                self.isProgrammaticScroll = false
-                self.lastReportedSectionID = request.id
-                self.visibleSectionChangedHandler?(request.id)
-                listPositionSettled()
+                pendingScrollPhase = .verifying
+                schedulePendingScrollAfterLayout()
+
+            case .verifying:
+                verifyPendingScroll(
+                    request,
+                    targetSectionIndex: sectionIndex,
+                    in: tableView,
+                    scrollCommandReceived: scrollCommandReceived,
+                    listPositionSettled: listPositionSettled,
+                    listPositionFailed: listPositionFailed
+                )
+            }
+        }
+
+        /// Recovers the observed "sections exist but nothing is visible" state
+        /// before scrolling. It also prevents UIKit from receiving an index path
+        /// whose live snapshot does not contain the sentinel/event row yet.
+        private func prepareTableForPositioning(
+            _ tableView: UITableView,
+            targetSectionIndex: Int
+        ) -> Bool {
+            let targetIsMissing = targetSectionIndex >= tableView.numberOfSections ||
+                tableView.numberOfRows(inSection: targetSectionIndex) == 0
+            let hasVisibleRows = !(tableView.indexPathsForVisibleRows ?? []).isEmpty
+            let hasInvalidOffset = !isValidContentOffset(in: tableView)
+
+            if targetIsMissing ||
+                (!sections.isEmpty && tableView.contentSize.height > 0 && !hasVisibleRows) ||
+                hasInvalidOffset {
+                let clampedY = clampedContentOffsetY(
+                    tableView.contentOffset.y,
+                    in: tableView
+                )
+                if abs(clampedY - tableView.contentOffset.y) > 0.5 {
+                    tableView.setContentOffset(
+                        CGPoint(x: tableView.contentOffset.x, y: clampedY),
+                        animated: false
+                    )
+                }
+                tableView.reloadData()
+                tableView.layoutIfNeeded()
             }
 
-            performScroll()
+            return targetSectionIndex < tableView.numberOfSections &&
+                tableView.numberOfRows(inSection: targetSectionIndex) > 0
+        }
+
+        private func issueScroll(
+            to sectionIndex: Int,
+            request: AgendaScrollRequest,
+            in tableView: UITableView,
+            scrollCommandReceived: (AgendaScrollRequest) -> Void
+        ) {
+            if !hasAcknowledgedPendingScrollCommand {
+                hasAcknowledgedPendingScrollCommand = true
+                scrollCommandReceived(request)
+            }
+            isProgrammaticScroll = true
+            tableView.scrollToRow(
+                at: IndexPath(row: 0, section: sectionIndex),
+                at: .top,
+                animated: false
+            )
+            tableView.layoutIfNeeded()
+            isProgrammaticScroll = false
+        }
+
+        private func verifyPendingScroll(
+            _ request: AgendaScrollRequest,
+            targetSectionIndex: Int,
+            in tableView: UITableView,
+            scrollCommandReceived: (AgendaScrollRequest) -> Void,
+            listPositionSettled: () -> Void,
+            listPositionFailed: () -> Void
+        ) {
+            tableView.layoutIfNeeded()
+
+            let landedID = topmostSectionID(in: tableView)
+            let isHeaderVisible = tableView.headerView(forSection: targetSectionIndex) != nil
+            let isRowVisible = tableView.indexPathsForVisibleRows?.contains(where: { $0.section == targetSectionIndex }) ?? false
+
+            // Quantifies any miss for the `AgendaSync` log: comparing the
+            // landed section's index against the target's in `self.sections`
+            // shows both direction and magnitude of a mismatch, rather than
+            // only "wrong" with no detail — cheap and bounded (at most
+            // `maximumScrollVerificationAttempts` calls per transaction).
+            let landedIndex = landedID.flatMap(sectionIndex(for:))
+            agendaTableDiagnosticsLogger.debug(
+                "verify-attempt=\(self.pendingScrollVerificationAttempts, privacy: .public) target=\(request.id, privacy: .public) targetIndex=\(targetSectionIndex, privacy: .public) landed=\(landedID ?? "nil", privacy: .public) landedIndex=\(landedIndex ?? -1, privacy: .public) headerVisible=\(isHeaderVisible, privacy: .public) rowVisible=\(isRowVisible, privacy: .public) contentOffsetY=\(tableView.contentOffset.y, privacy: .public) targetRectMinY=\(tableView.rect(forSection: targetSectionIndex).minY, privacy: .public)"
+            )
+
+            if landedID == request.id && (isHeaderVisible || isRowVisible) {
+                completePendingScroll(
+                    request,
+                    targetSectionIndex: targetSectionIndex,
+                    in: tableView,
+                    listPositionSettled: listPositionSettled
+                )
+                return
+            }
+
+            pendingScrollVerificationAttempts += 1
+            guard pendingScrollVerificationAttempts < maximumScrollVerificationAttempts else {
+                if !hasAppliedFinalScrollRecovery {
+                    hasAppliedFinalScrollRecovery = true
+                    applyFinalScrollRecovery(
+                        to: targetSectionIndex,
+                        in: tableView
+                    )
+                    schedulePendingScrollAfterLayout()
+                } else {
+                    failPendingScroll(request, listPositionFailed: listPositionFailed)
+                }
+                return
+            }
+
+            if let landedIndex, landedIndex != targetSectionIndex {
+                let deltaSections = CGFloat(targetSectionIndex - landedIndex)
+                let estimatedSectionHeight: CGFloat = sections[targetSectionIndex].isEmpty ? 116 : 184
+                let estimatedDeltaY = deltaSections * estimatedSectionHeight
+                let newOffsetY = clampedContentOffsetY(tableView.contentOffset.y + estimatedDeltaY, in: tableView)
+                tableView.setContentOffset(CGPoint(x: tableView.contentOffset.x, y: newOffsetY), animated: false)
+                tableView.layoutIfNeeded()
+            }
+
+            // The first long jump can use estimated self-sizing heights. A
+            // bounded reload/jump lets the target's concrete hosting sizes take
+            // part in the following verification without visible animation.
+            tableView.reloadData()
+            tableView.layoutIfNeeded()
+            issueScroll(
+                to: targetSectionIndex,
+                request: request,
+                in: tableView,
+                scrollCommandReceived: scrollCommandReceived
+            )
+            schedulePendingScrollAfterLayout()
+        }
+
+        /// Last-resort recovery uses the section's post-reload rect directly,
+        /// rather than another row estimate. If that still cannot make the
+        /// requested section leading, terminate the transaction explicitly so
+        /// the calendar/list synchronization latch cannot remain stuck.
+        private func applyFinalScrollRecovery(
+            to sectionIndex: Int,
+            in tableView: UITableView
+        ) {
+            tableView.reloadData()
+            tableView.layoutIfNeeded()
+            let targetY = tableView.rect(forSection: sectionIndex).minY - tableView.adjustedContentInset.top
+            tableView.setContentOffset(
+                CGPoint(
+                    x: tableView.contentOffset.x,
+                    y: clampedContentOffsetY(targetY, in: tableView)
+                ),
+                animated: false
+            )
+            tableView.layoutIfNeeded()
+        }
+
+        private func completePendingScroll(
+            _ request: AgendaScrollRequest,
+            targetSectionIndex: Int,
+            in tableView: UITableView,
+            listPositionSettled: () -> Void
+        ) {
+            // Verified geometry has been observed to disagree with what's
+            // actually painted: two scroll requests issued back-to-back
+            // (the first abandoned mid-flight, the second landing and
+            // verifying successfully) still showed the *first* transaction's
+            // day on screen despite the second's `contentOffsetY` matching
+            // `targetRectMinY` to five decimals. Headers come from the
+            // delegate (`viewForHeaderInSection`), not the diffable data
+            // source, and `reloadData()`/`applySnapshotUsingReloadData` is
+            // not guaranteed to force UIKit to re-query the *currently
+            // pinned* sticky header specifically, even though it reloads
+            // everything else. Force it explicitly rather than trust that
+            // the geometry match implies the visible header matches too.
+            // Done after clearing the pending-scroll state below (not
+            // before), so the layout pass this can trigger has nothing
+            // pending left to reschedule against.
+
+            pendingScrollRequest = nil
+            pendingScrollCommandReceived = nil
+            pendingListPositionSettled = nil
+            pendingListPositionFailed = nil
+            pendingScrollVerificationAttempts = 0
+            pendingScrollPhase = .awaitingLayout
+            hasAcknowledgedPendingScrollCommand = false
+            hasAppliedFinalScrollRecovery = false
+            // UITableViewDiffableDataSource forbids calling mutation APIs like reloadSections directly.
+            // Reconfigure visible header views directly via headerView(forSection:) instead.
+            let visibleSections = Set((tableView.indexPathsForVisibleRows ?? []).map(\.section) + [targetSectionIndex])
+            for sectionIndex in visibleSections {
+                if let headerView = tableView.headerView(forSection: sectionIndex),
+                   let section = self.section(at: sectionIndex),
+                   let content = self.listHeaderViewContent {
+                    headerView.contentConfiguration = UIHostingConfiguration { content(section) }
+                        .margins(.all, 0)
+                }
+            }
+            lastHandledScrollToken = request.token
+            lastReportedSectionID = request.id
+            visibleSectionChangedHandler?(request.id)
+            listPositionSettled()
+            revealInitialContentIfNeeded()
+        }
+
+        private func failPendingScroll(
+            _ request: AgendaScrollRequest,
+            listPositionFailed: () -> Void
+        ) {
+            pendingScrollRequest = nil
+            pendingScrollCommandReceived = nil
+            pendingListPositionSettled = nil
+            pendingListPositionFailed = nil
+            pendingScrollVerificationAttempts = 0
+            pendingScrollPhase = .awaitingLayout
+            hasAcknowledgedPendingScrollCommand = false
+            hasAppliedFinalScrollRecovery = false
+            lastHandledScrollToken = request.token
+            listPositionFailed()
+            revealInitialContentIfNeeded()
+        }
+
+        private func topmostSectionID(in tableView: UITableView) -> String? {
+            guard let visibleRows = tableView.indexPathsForVisibleRows,
+                  !visibleRows.isEmpty
+            else { return nil }
+
+            let topY = tableView.contentOffset.y + tableView.adjustedContentInset.top + 1
+            let visibleSectionIndexes = Set(visibleRows.map(\.section)).sorted()
+            let sectionIndex = visibleSectionIndexes.last {
+                tableView.rect(forSection: $0).minY <= topY
+            } ?? visibleSectionIndexes[0]
+            return section(at: sectionIndex)?.id
+        }
+
+        private func isValidContentOffset(in tableView: UITableView) -> Bool {
+            let lowerBound = -tableView.adjustedContentInset.top
+            let upperBound = max(
+                lowerBound,
+                tableView.contentSize.height - tableView.bounds.height + tableView.adjustedContentInset.bottom
+            )
+            return tableView.contentOffset.y >= lowerBound - 1 &&
+                tableView.contentOffset.y <= upperBound + 1
+        }
+
+        private func clampedContentOffsetY(_ offsetY: CGFloat, in tableView: UITableView) -> CGFloat {
+            let lowerBound = -tableView.adjustedContentInset.top
+            let upperBound = max(
+                lowerBound,
+                tableView.contentSize.height - tableView.bounds.height + tableView.adjustedContentInset.bottom
+            )
+            return min(max(offsetY, lowerBound), upperBound)
         }
 
         // MARK: User scroll
 
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
-            guard !isProgrammaticScroll else { return }
+            let isUserDriven = scrollView.isTracking
+                || scrollView.isDragging
+                || scrollView.isDecelerating
+            guard isUserDriven, !isProgrammaticScroll else { return }
             reportTopmostSection()
         }
 
@@ -348,20 +776,23 @@ struct AgendaTableView<
             reportTopmostSection()
         }
 
-        /// Whichever section owns the row just past the top inset is, by
-        /// definition, the day the sticky header is currently showing.
+        /// Reports the section whose original layout rect contains the leading
+        /// content edge. Probing indexPathForRow(at:) at that edge is
+        /// unreliable because the point normally lies inside the pinned header,
+        /// where there is no row index path.
         private func reportTopmostSection() {
-            guard let tableView else { return }
+            guard let tableView,
+                  let visibleRows = tableView.indexPathsForVisibleRows,
+                  !visibleRows.isEmpty else { return }
 
-            let probe = CGPoint(
-                x: tableView.bounds.midX,
-                y: tableView.contentOffset.y + tableView.adjustedContentInset.top + 1
-            )
+            let topY = tableView.contentOffset.y + tableView.adjustedContentInset.top + 1
+            let visibleSectionIndexes = Set(visibleRows.map(\.section)).sorted()
+            let sectionIndex = visibleSectionIndexes.last {
+                tableView.rect(forSection: $0).minY <= topY
+            } ?? visibleSectionIndexes[0]
 
-            guard let indexPath = tableView.indexPathForRow(at: probe),
-                  let section = section(at: indexPath.section),
-                  section.id != lastReportedSectionID
-            else { return }
+            guard let section = section(at: sectionIndex),
+                  section.id != lastReportedSectionID else { return }
 
             lastReportedSectionID = section.id
             visibleSectionChangedHandler?(section.id)

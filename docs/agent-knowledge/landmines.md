@@ -426,3 +426,39 @@ defensive `numberOfRows(inSection:) > 0` recheck (forcing one more
 `reloadData()` if it disagrees) still guards `AgendaTableView`'s
 `scrollToRow` call, in case `self.sections` and the live table view ever
 desync for an unrelated reason in the future.
+
+---
+
+## 17. `UITableViewDiffableDataSource` prohibits direct table mutation APIs
+
+Calling `tableView.reloadSections(...)`, `tableView.insertSections(...)`, or
+`tableView.reloadRows(...)` directly on a `UITableView` managed by
+`UITableViewDiffableDataSource` throws an immediate `NSInternalInconsistencyException`:
+`UITableView must be updated via the UITableViewDiffableDataSource APIs when that feature is enabled.`
+
+To refresh visible sticky headers without mutating the diffable data source:
+```swift
+// ❌ Crashes with UITableViewDiffableDataSource
+tableView.reloadSections(IndexSet(integer: targetSectionIndex), with: .none)
+
+// ✅ Safely reconfigures the existing visible header view
+if let headerView = tableView.headerView(forSection: sectionIndex),
+   let section = self.section(at: sectionIndex),
+   let content = self.listHeaderViewContent {
+    headerView.contentConfiguration = UIHostingConfiguration { content(section) }
+        .margins(.all, 0)
+}
+```
+
+---
+
+## 18. `tableView.rect(forSection:)` returns estimated rects for un-rendered sections
+
+In self-sizing table views, querying `tableView.rect(forSection:)` before intervening sections
+have been scrolled past or rendered returns an estimated rect computed from `estimatedRowHeight`
+and `estimatedSectionHeaderHeight`.
+
+If a programmatic scroll check compares `contentOffset.y` against `rect(forSection: target).minY`,
+the check can circularly pass on attempt 0 even when the viewport has actually landed on a completely
+different day. Always verify arrival against visible views (`tableView.headerView(forSection:) != nil`
+or `tableView.indexPathsForVisibleRows?.contains(where: { $0.section == target })`).

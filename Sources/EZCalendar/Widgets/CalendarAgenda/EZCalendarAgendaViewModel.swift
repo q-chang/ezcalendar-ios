@@ -362,6 +362,18 @@ final class EZCalendarAgendaViewModel: ObservableObject {
         requestListScroll(to: date)
     }
 
+    /// Re-anchors the agenda list to the current selection when backing data changes
+    /// (e.g. events or months are reloaded), so dynamic height changes do not displace the user.
+    func reanchorSelection() {
+        let date = selection
+        let id = EZCalendarAgendaLogic.dayID(for: date, calendar: calendar)
+        if visibleListSectionID == id {
+            visibleListSectionID = nil
+        }
+        pendingScrollTarget = nil
+        requestListScroll(to: date)
+    }
+
     // MARK: - Mode transitions
 
     /// Settles `progress` on a mode change, and pre-positions the pager that is
@@ -737,12 +749,9 @@ final class EZCalendarAgendaViewModel: ObservableObject {
     /// here again, often one section short. Releasing the latch on the
     /// first echo made that correction read as a genuine user scroll and
     /// silently reassigned `selection` to the wrong day. On iOS,
-    /// `AgendaTableView` positions synchronously and exactly, so there is no
-    /// estimate to correct — but the contract is the same either way: the
-    /// latch is only released by `listPositionSettled()`, once the caller
-    /// considers positioning to have actually completed (macOS: after its
-    /// fade-settle delay; iOS: immediately, since `scrollToRow` already
-    /// landed by the time it's called).
+    /// `AgendaTableView` verifies the rendered leading section after
+    /// self-sizing layout and only then calls `listPositionSettled()`. The
+    /// latch is released only when positioning has actually completed.
     func visibleSectionChanged(_ id: String?) {
         guard let id else { return }
         visibleListSectionID = id
@@ -762,15 +771,45 @@ final class EZCalendarAgendaViewModel: ObservableObject {
         selection = date
     }
 
-    /// Called once the list's positioning is considered complete — on
-    /// macOS, after the fade-hidden scroll has had a real layout pass to
-    /// land on; on iOS, right after `AgendaTableView`'s synchronous
-    /// `scrollToRow` returns, since there is nothing further to wait on.
+    /// Called once the list's positioning is complete — on macOS, after the
+    /// fade-hidden scroll has had a real layout pass; on iOS, only after
+    /// `AgendaTableView` verifies that the requested section is leading.
     /// Only now does a reported section id count as a genuine user scroll.
     /// A no-op if nothing is in flight.
     func listPositionSettled() {
         guard isDrivingList else { return }
+        let handledToken = scrollRequest?.token
         releaseListLatchNow()
+
+        // The UIKit bridge may receive a request before its first data
+        // snapshot exists. Keep the request alive until positioning succeeds,
+        // then clear only that handled token outside the representable update.
+        Task { @MainActor [weak self] in
+            await Task.yield()
+            guard let self,
+                  self.scrollRequest?.token == handledToken else { return }
+            self.scrollRequest = nil
+        }
+    }
+
+    /// Ends a bounded UIKit positioning transaction that could not prove the
+    /// requested section is leading. This is deliberately different from a
+    /// successful arrival: it never reports a false list position, but it does
+    /// release the latch and clear the request so later user scrolling or a new
+    /// selection remains responsive.
+    func listPositionFailed() {
+        guard isDrivingList else { return }
+        let handledToken = scrollRequest?.token
+        syncLogger.error("list-transaction=\(self.activeListTransactionID?.uuidString ?? "none", privacy: .public) positioning-failed")
+        releaseListLatchNow()
+
+        Task { @MainActor [weak self] in
+            await Task.yield()
+            guard let self,
+                  self.scrollRequest?.token == handledToken
+            else { return }
+            self.scrollRequest = nil
+        }
     }
 
     /// The list reported new header positions. Whichever header is pinned at the

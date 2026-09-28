@@ -19,6 +19,41 @@ authoritative package version.
 .package(url: "https://github.com/q-chang/ezcalendar-ios", from: "NEXT_VERSION")
 ```
 
+## EZCalendar 2.2.1
+
+This release fixes list scroll misalignment and desynchronization when calendar events
+load asynchronously or across large date ranges on iOS.
+
+### 🐛 Fixes
+- **Async Data Load Re-anchoring**: Fixed an issue where the agenda list content shifted away
+  from the selected date (e.g. landing on an earlier day) after events loaded asynchronously.
+  `EZCalendarAgendaView` now automatically re-anchors to `viewModel.selection` on `eventsRevision`,
+  `eventsFingerprint`, and `calendarMonths` updates, and `AgendaTableView` preserves the visible
+  anchor section when applying diffable data snapshots.
+- **Accurate Row & Header Height Estimation**: Implemented `tableView(_:estimatedHeightForRowAt:)`
+  and `tableView(_:estimatedHeightForHeaderInSection:)` in `AgendaTableView`, differentiating
+  empty days (~72pt) from event days (~140pt). This eliminates cumulative height estimation errors
+  that previously caused long programmatic jumps (across months or a year) to undershoot.
+- **Strict Verification & Directional Convergence**: Fixed premature verification exit in
+  `AgendaTableView` where estimated section rects produced false-positive arrival detections.
+  Verification now checks that the target section's header or row is genuinely visible in the viewport,
+  and retries dynamically nudge `contentOffset.y` towards the target section index for swift convergence.
+- **Diffable Data Source Mutation Safety**: Resolved `NSInternalInconsistencyException` crash caused
+  by mutating section reloads with `UITableViewDiffableDataSource`; visible headers are now safely
+  reconfigured directly via `headerView(forSection:).contentConfiguration`.
+
+### 📚 Documentation
+- Updated `docs/agent-knowledge/landmines.md` with landmines #17 and #18 covering diffable data
+  source mutation constraints and un-rendered section estimation pitfalls.
+
+### ⚠️ Breaking changes
+- None.
+
+### Installation
+```swift
+.package(url: "https://github.com/q-chang/ezcalendar-ios", from: "2.2.1")
+```
+
 ## EZCalendar 2.2.0
 
 This release makes the agenda list's iOS scroll positioning and sticky

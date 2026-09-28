@@ -46,8 +46,10 @@ struct AgendaListView<Event: Identifiable, ListHeaderView: View, EventItemView: 
     let scrollCommandReceived: (AgendaScrollRequest) -> Void
     let visibleSectionChanged: (String?) -> Void
     let listPositionSettled: () -> Void
+    let listPositionFailed: () -> Void
 
     let sections: [EZCalendarAgendaSection<Event>]
+    let contentRevision: Int
 
     let listHeaderViewContent: (EZCalendarAgendaSection<Event>) -> ListHeaderView
     let eventItemViewContent: (Event) -> EventItemView
@@ -96,8 +98,9 @@ struct AgendaListView<Event: Identifiable, ListHeaderView: View, EventItemView: 
 
     private var list: some View {
         #if os(iOS)
-        // `UITableView` positions exactly and sticks section headers by
-        // default — see `AgendaTableView`'s own documentation for why both
+        // `UITableView` supplies sticky section headers by default. Its bridge
+        // verifies the rendered leading section after every programmatic jump
+        // before acknowledging it — see `AgendaTableView` for why both
         // the SwiftUI-native `scrollPosition(id:anchor:)` implementation and
         // a `UICollectionView` bridge (two different, correctly-configured
         // sticky-header layouts) still weren't trustworthy. SwiftUI still
@@ -110,21 +113,12 @@ struct AgendaListView<Event: Identifiable, ListHeaderView: View, EventItemView: 
             scrollCommandReceived: scrollCommandReceived,
             visibleSectionChanged: visibleSectionChanged,
             listPositionSettled: listPositionSettled,
+            listPositionFailed: listPositionFailed,
+            contentRevision: contentRevision,
             listHeaderViewContent: listHeaderViewContent,
             eventItemViewContent: eventItemViewContent,
             emptyDayViewContent: emptyDayViewContent
         )
-        .task(id: scrollRequest?.token) {
-            // The collection view already positioned itself, synchronously
-            // and exactly, inside `updateUIView` before this task's first
-            // line runs. This only owns clearing the one-shot request —
-            // deferred to a `.task` rather than done inline, so it never
-            // mutates the binding mid-view-update.
-            guard let request = scrollRequest else { return }
-            await Task.yield()
-            guard !Task.isCancelled, scrollRequest?.token == request.token else { return }
-            scrollRequest = nil
-        }
         #else
         GeometryReader { geometry in
             ScrollView {
