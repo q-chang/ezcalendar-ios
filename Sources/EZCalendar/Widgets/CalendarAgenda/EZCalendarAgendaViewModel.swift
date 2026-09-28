@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import OSLog
 import SwiftUI
 
 /**
@@ -46,6 +47,11 @@ import SwiftUI
 @MainActor
 final class EZCalendarAgendaViewModel: ObservableObject {
 
+    private let syncLogger = Logger(
+        subsystem: "com.ezcalendar",
+        category: "AgendaSync"
+    )
+
     // MARK: - Configuration
 
     let calendar: Calendar
@@ -76,6 +82,11 @@ final class EZCalendarAgendaViewModel: ObservableObject {
     /// Scroll positions of the two horizontal pagers, one per mode.
     @Published var visibleMonthID: String?
     @Published var visibleWeekID: String?
+
+    /// The week page a mode transition is preparing. SwiftUI may report an
+    /// initial scroll position from the previous page while this pager mounts;
+    /// that report must not be treated as a user swipe.
+    private var initialWeekPagerTargetID: String?
 
     // MARK: - Collapse state
 
@@ -118,7 +129,9 @@ final class EZCalendarAgendaViewModel: ObservableObject {
     // MARK: - List state
 
     /// Where each visible section header sits, in the list's coordinate space.
-    @Published private(set) var headerOffsets: [AgendaHeaderOffset] = []
+    private var headerOffsets: [AgendaHeaderOffset] = []
+    private var lastObservedTopSectionID: String?
+    private var visibleListSectionID: String?
 
     /// What the list should scroll to, and whether to animate getting there.
     /// The view watches this inside its `ScrollViewReader` and calls `scrollTo`.
@@ -130,8 +143,8 @@ final class EZCalendarAgendaViewModel: ObservableObject {
     // MARK: - Re-entrancy latches
 
     private var isDrivingList = false
+    private var isAcceptingListSelection = false
     private var isDrivingPager = false
-    private var listSyncRelease: Task<Void, Never>?
     private var pagerSyncRelease: Task<Void, Never>?
 
     /// The section id an in-flight scroll is heading for. The list latch is
@@ -139,10 +152,25 @@ final class EZCalendarAgendaViewModel: ObservableObject {
     /// `headerOffsetsChanged(_:)`.
     private var pendingScrollTarget: String?
 
+    /// A pinned header preference can contain the just-replaced sticky header
+    /// for one more layout pass. Keep the confirmed target authoritative until
+    /// that header is no longer parked at the list top.
+    private var settledListTarget: String?
+
+    /// Correlates every signal belonging to one calendar-to-list positioning
+    /// transaction. It exists for diagnostics as well as making it possible to
+    /// prove that a rendered header belongs to the command that initiated it.
+    private var activeListTransactionID: UUID?
+
     /// The very first scroll positions the list on the selected day. That one
     /// must not animate: the day can be months from the top of the range, and
     /// animating there would scroll through every section in between.
     private var hasPositionedList = false
+
+    /// A mode transition keeps the current list visible while the calendar
+    /// animates. The target is issued as an immediate list reposition only when
+    /// that calendar transition finishes.
+    private var deferredListScrollDate: Date?
 
     /// Scroll offset the list last reported, and the offset it was resting at
     /// when the current mode settled. The collapse is driven by the difference.
@@ -296,10 +324,22 @@ final class EZCalendarAgendaViewModel: ObservableObject {
     ///
     /// Updates the selected day and optionally collapses a monthly calendar.
     func selectDay(_ date: Date, collapseOnSelection: Bool = true) {
-        selection = calendar.startOfDay(for: date)
+        let selectedDate = calendar.startOfDay(for: date)
+        let shouldCollapse = mode == .monthly && collapseOnSelection
 
-        if mode == .monthly && collapseOnSelection {
+        syncLogger.debug("calendar-tap selected=\(EZCalendarAgendaLogic.dayID(for: selectedDate, calendar: self.calendar), privacy: .public) mode=\(String(describing: self.mode), privacy: .public) collapses=\(shouldCollapse, privacy: .public)")
+
+        // Establish calendar and list targets before selection publishes. The
+        // old sticky header cannot overwrite this transaction while the calendar
+        // is animating to its new mode.
+        primePagers(for: selectedDate)
+        deferListScroll(to: selectedDate)
+        selection = selectedDate
+
+        if shouldCollapse {
             mode = .weekly
+        } else {
+            completeDeferredListScroll()
         }
     }
 
@@ -309,11 +349,15 @@ final class EZCalendarAgendaViewModel: ObservableObject {
         let date = selection
         syncPager(to: date, mode: mode)
 
-        // Cheapest echo guard: if the list is already showing this day at the
-        // top, it was the list that moved the selection. Scrolling it again
-        // would fight the user's finger.
         let targetID = EZCalendarAgendaLogic.dayID(for: date, calendar: calendar)
-        guard EZCalendarAgendaLogic.topMostSectionID(headerOffsets: headerOffsets) != targetID else { return }
+        guard pendingScrollTarget != targetID else { return }
+
+        // A user-driven scroll already placed this section at the top. Do not
+        // issue another positioning command in response to its own selection.
+        if visibleListSectionID == targetID {
+            isAcceptingListSelection = true
+            return
+        }
 
         requestListScroll(to: date)
     }
@@ -330,6 +374,17 @@ final class EZCalendarAgendaViewModel: ObservableObject {
         // the selection — so latch before it appears, not only when we move it.
         holdPagerLatch()
 
+        // A handle-driven mode change has no calendar tap, but it still needs
+        // the selected day's header at the top once the transition is complete.
+        if deferredListScrollDate == nil {
+            deferListScroll(to: selection)
+        }
+
+        if mode == .weekly,
+           let index = EZCalendarAgendaLogic.index(ofWeekContaining: selection, in: weekPages, calendar: calendar) {
+            initialWeekPagerTargetID = weekPages[index].id
+        }
+
         syncPager(to: selection, mode: mode)
 
         let target = mode.progress
@@ -337,7 +392,10 @@ final class EZCalendarAgendaViewModel: ObservableObject {
         // A gesture that ran all the way to the end has already put `progress`
         // where it belongs; animating a no-op would raise and drop
         // `isTransitioning` for one frame and flicker the pager swap.
-        guard progress != target else { return }
+        guard progress != target else {
+            completeDeferredListScroll()
+            return
+        }
 
         isTransitioning = true
 
@@ -353,8 +411,40 @@ final class EZCalendarAgendaViewModel: ObservableObject {
             withTransaction(transaction) {
                 self.isTransitioning = false
             }
+            self.completeDeferredListScroll()
         }
     }
+
+    private func deferListScroll(to date: Date) {
+        let id = EZCalendarAgendaLogic.dayID(for: date, calendar: calendar)
+        guard sectionDates[id] != nil else { return }
+
+        activeListTransactionID = UUID()
+        settledListTarget = nil
+        isDrivingList = true
+        isAcceptingListSelection = false
+        pendingScrollTarget = id
+        scrollCorrectionsRemaining = 4
+        deferredListScrollDate = date
+        syncLogger.debug("list-transaction=\(self.activeListTransactionID?.uuidString ?? "none", privacy: .public) prepared target=\(id, privacy: .public)")
+    }
+
+    private func completeDeferredListScroll() {
+        guard let date = deferredListScrollDate else { return }
+        deferredListScrollDate = nil
+
+        let id = EZCalendarAgendaLogic.dayID(for: date, calendar: calendar)
+        guard pendingScrollTarget == id else { return }
+
+        scrollRequest = AgendaScrollRequest(
+            token: UUID(),
+            id: id,
+            transition: .immediate
+        )
+        syncLogger.debug("list-transaction=\(self.activeListTransactionID?.uuidString ?? "none", privacy: .public) request-issued target=\(id, privacy: .public)")
+        hasPositionedList = true
+    }
+
 
     // MARK: - Collapse gesture
     //
@@ -504,7 +594,23 @@ final class EZCalendarAgendaViewModel: ObservableObject {
     /// The user swiped the pager. Applies the mode's selection rule:
     /// today if the new page contains it, otherwise the page's first day.
     func pagerScrolled(to id: String?) {
-        guard !isDrivingPager, let id else { return }
+        guard let id else { return }
+
+        if mode == .weekly, let targetID = initialWeekPagerTargetID {
+            guard id == targetID else {
+                // The first report from a newly-mounted weekly pager can describe
+                // the old page. Restore the page selected by the calendar rather
+                // than stepping selection back into the preceding week.
+                visibleWeekID = targetID
+                return
+            }
+
+            initialWeekPagerTargetID = nil
+            isDrivingPager = false
+            return
+        }
+
+        guard !isDrivingPager else { return }
 
         let newSelection: Date?
 
@@ -524,6 +630,24 @@ final class EZCalendarAgendaViewModel: ObservableObject {
         else { return }
 
         selection = newSelection
+    }
+
+    /// Called by the weekly pager after it has mounted. A run-loop yield gives
+    /// SwiftUI a chance to publish its initial bound scroll position before user
+    /// swipes are allowed to change selection.
+    func weekPagerAppeared() {
+        guard let targetID = initialWeekPagerTargetID else { return }
+
+        Task { @MainActor [weak self] in
+            await Task.yield()
+            guard let self,
+                  self.initialWeekPagerTargetID == targetID,
+                  self.visibleWeekID == targetID
+            else { return }
+
+            self.initialWeekPagerTargetID = nil
+            self.isDrivingPager = false
+        }
     }
 
     /// Puts **both** pagers on the page holding `date`.
@@ -578,29 +702,88 @@ final class EZCalendarAgendaViewModel: ObservableObject {
 
     // MARK: - List sync
 
-    /// The list reported new header positions. Whichever header is pinned at the
-    /// top is the day the calendar should be showing as selected.
-    func headerOffsetsChanged(_ offsets: [AgendaHeaderOffset]) {
-        headerOffsets = offsets
+    /// The lazy stack has created a section. Only the pending target is logged,
+    /// which makes the console trace useful without logging every day the user
+    /// scrolls past.
+    func sectionAppeared(_ id: String) {
+        guard id == pendingScrollTarget,
+              deferredListScrollDate == nil
+        else { return }
+        syncLogger.debug("list-transaction=\(self.activeListTransactionID?.uuidString ?? "none", privacy: .public) target-materialized id=\(id, privacy: .public)")
+    }
 
-        let topID = EZCalendarAgendaLogic.topMostSectionID(headerOffsets: offsets)
+    /// Records the exact command `AgendaListView`'s active implementation is
+    /// about to execute (macOS: writing the `scrollPosition(id:)` binding;
+    /// iOS: `AgendaTableView.Coordinator.handleScrollRequest`'s
+    /// `scrollToRow`). This distinguishes a bad ViewModel target from a
+    /// correct target the list implementation failed to land on.
+    func scrollCommandReceived(_ request: AgendaScrollRequest) {
+        syncLogger.debug("list-transaction=\(self.activeListTransactionID?.uuidString ?? "none", privacy: .public) scroll-issued request=\(request.token.uuidString, privacy: .public) target=\(request.id, privacy: .public) transition=\(String(describing: request.transition), privacy: .public)")
+    }
 
-        // Do not read the list back while we are the ones moving it.
+    /// The list's reported leading section id is the authoritative
+    /// user-scroll signal, on both of `AgendaListView`'s implementations
+    /// (iOS's `AgendaTableView` UIKit bridge, and macOS's SwiftUI-native
+    /// `ScrollView` + `scrollPosition(id:)`). Unlike a geometry preference
+    /// it is the scroll view's own leading target identity, so adjacent
+    /// sticky headers cannot tie.
+    ///
+    /// While `isDrivingList` is held, every report here — including one that
+    /// echoes our own requested id — is an *intent* signal, not an *arrival*
+    /// one. This matters differently on each implementation: on macOS,
+    /// writing `scrollPosition` fires this synchronously, before the lazy
+    /// `LazyVStack` has actually settled on that section, and a distant
+    /// target's estimate gets corrected on a later layout pass — reporting
+    /// here again, often one section short. Releasing the latch on the
+    /// first echo made that correction read as a genuine user scroll and
+    /// silently reassigned `selection` to the wrong day. On iOS,
+    /// `AgendaTableView` positions synchronously and exactly, so there is no
+    /// estimate to correct — but the contract is the same either way: the
+    /// latch is only released by `listPositionSettled()`, once the caller
+    /// considers positioning to have actually completed (macOS: after its
+    /// fade-settle delay; iOS: immediately, since `scrollToRow` already
+    /// landed by the time it's called).
+    func visibleSectionChanged(_ id: String?) {
+        guard let id else { return }
+        visibleListSectionID = id
+
         if isDrivingList {
-            // Release on *arrival* rather than on a timer. A timer has to guess
-            // how long the scroll takes, and guessing short is catastrophic: the
-            // latch lifts mid-flight, every header the list is still flying past
-            // rewrites the selection, and each rewrite starts another scroll.
-            correctScroll(towards: offsets)
+            guard id == pendingScrollTarget else { return }
+            syncLogger.debug("list-transaction=\(self.activeListTransactionID?.uuidString ?? "none", privacy: .public) position-arrived target=\(id, privacy: .public)")
             return
         }
 
-        guard let topID,
-              let date = sectionDates[topID],
+        guard isAcceptingListSelection,
+              let date = sectionDates[id],
               !calendar.isDate(date, inSameDayAs: selection)
         else { return }
 
+        syncLogger.debug("user-list position-updated id=\(id, privacy: .public)")
         selection = date
+    }
+
+    /// Called once the list's positioning is considered complete — on
+    /// macOS, after the fade-hidden scroll has had a real layout pass to
+    /// land on; on iOS, right after `AgendaTableView`'s synchronous
+    /// `scrollToRow` returns, since there is nothing further to wait on.
+    /// Only now does a reported section id count as a genuine user scroll.
+    /// A no-op if nothing is in flight.
+    func listPositionSettled() {
+        guard isDrivingList else { return }
+        releaseListLatchNow()
+    }
+
+    /// The list reported new header positions. Whichever header is pinned at the
+    /// top is the day the calendar should be showing as selected.
+    func headerOffsetsChanged(_ offsets: [AgendaHeaderOffset]) {
+        if headerOffsets != offsets {
+            headerOffsets = offsets
+        }
+
+        // Retained for source compatibility with existing callers/tests. The
+        // agenda now takes its scroll state from ScrollView.scrollPosition,
+        // whose target identity cannot be confused by overlapping sticky
+        // headers or layout estimates.
     }
 
     /// Turns the list's scroll into collapse progress.
@@ -629,17 +812,29 @@ final class EZCalendarAgendaViewModel: ObservableObject {
     /// so progress simply holds — which is the right behaviour: deep in the list
     /// the calendar stays collapsed.
     /// Asks the list to bring `date`'s sticky header to the top.
-    private func requestListScroll(to date: Date) {
+    private func requestListScroll(
+        to date: Date,
+        transition: AgendaScrollTransition? = nil
+    ) {
         let id = EZCalendarAgendaLogic.dayID(for: date, calendar: calendar)
         guard sectionDates[id] != nil else { return }
 
+        activeListTransactionID = UUID()
+        settledListTarget = nil
         isDrivingList = true
+        isAcceptingListSelection = false
         pendingScrollTarget = id
-        scrollCorrectionsRemaining = 3
-        scrollRequest = AgendaScrollRequest(id: id, animated: hasPositionedList)
+        scrollCorrectionsRemaining = 4
+        scrollRequest = AgendaScrollRequest(
+            token: UUID(),
+            id: id,
+            // Calendar selection and paging must never visibly scroll the
+            // agenda. The list jumps to the selected header after the calendar
+            // has settled; only direct user scrolling moves it continuously.
+            transition: transition ?? .immediate
+        )
+        syncLogger.debug("list-transaction=\(self.activeListTransactionID?.uuidString ?? "none", privacy: .public) request-issued target=\(id, privacy: .public)")
         hasPositionedList = true
-
-        releaseListLatch()
     }
 
     /// Nudges the list onto its target, then releases the latch.
@@ -665,38 +860,30 @@ final class EZCalendarAgendaViewModel: ObservableObject {
         guard let landed = offsets.first(where: { $0.id == target }) else { return }
 
         if abs(landed.minY) <= arrivalSlack {
+            syncLogger.debug("list-transaction=\(self.activeListTransactionID?.uuidString ?? "none", privacy: .public) arrived target=\(target, privacy: .public) y=\(landed.minY, privacy: .public)")
             releaseListLatchNow()
             return
         }
 
         guard scrollCorrectionsRemaining > 0 else {
-            releaseListLatchNow()
+            // Keep the calendar selection authoritative. The trailing list
+            // spacer makes this target reachable on the next layout pass.
             return
         }
 
         scrollCorrectionsRemaining -= 1
-        scrollRequest = AgendaScrollRequest(id: target, animated: false)
-    }
-
-    /// Backstop only. The latch is normally released by arrival, in
-    /// `headerOffsetsChanged(_:)`; this covers the case where the target never
-    /// reports itself — a section that was removed mid-scroll, or a list too
-    /// short to bring that day to the top.
-    private func releaseListLatch() {
-        listSyncRelease?.cancel()
-        listSyncRelease = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 1_500_000_000)
-            guard !Task.isCancelled else { return }
-            self?.releaseListLatchNow()
-        }
+        syncLogger.debug("list-transaction=\(self.activeListTransactionID?.uuidString ?? "none", privacy: .public) correction target=\(target, privacy: .public) y=\(landed.minY, privacy: .public) remaining=\(self.scrollCorrectionsRemaining, privacy: .public)")
+        scrollRequest = AgendaScrollRequest(token: UUID(), id: target, transition: .immediate)
     }
 
     private func releaseListLatchNow() {
-        listSyncRelease?.cancel()
-        listSyncRelease = nil
+        syncLogger.debug("list-transaction=\(self.activeListTransactionID?.uuidString ?? "none", privacy: .public) latch-released")
+        settledListTarget = pendingScrollTarget
         pendingScrollTarget = nil
         scrollCorrectionsRemaining = 0
         isDrivingList = false
+        isAcceptingListSelection = true
+        activeListTransactionID = nil
     }
 
     /// Holds the pager latch across a programmatic move, so the page we just

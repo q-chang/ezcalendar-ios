@@ -114,7 +114,85 @@ struct AgendaViewModelTests {
         #expect(viewModel.scrollRequest?.id == EZCalendarAgendaLogic.dayID(for: target, calendar: calendar))
         // The first positioning jumps; animating it would scroll through every
         // section between the top of the range and the selected day.
-        #expect(viewModel.scrollRequest?.animated == false)
+        #expect(viewModel.scrollRequest?.transition == .immediate)
+    }
+
+    @Test("A calendar tap keeps its selected week and list target authoritative")
+    func calendarTapKeepsPagerAndListInSync() {
+        let viewModel = makeViewModel(mode: .monthly)
+        let target = Fixture.date(2030, 7, 22)
+        let targetID = EZCalendarAgendaLogic.dayID(for: target, calendar: calendar)
+
+        viewModel.sectionDates = [
+            targetID: target,
+            EZCalendarAgendaLogic.dayID(for: Fixture.date(2030, 7, 10), calendar: calendar): Fixture.date(2030, 7, 10)
+        ]
+
+        viewModel.selectDay(target)
+
+        #expect(viewModel.selection == target)
+        #expect(viewModel.mode == .weekly)
+        #expect(viewModel.visibleWeekPage?.days.contains { $0.date == target } == true)
+        // The designer flow keeps the current list in place until the calendar
+        // finishes its month-to-week animation.
+        #expect(viewModel.scrollRequest == nil)
+
+        // The old list header must not pull selection/pager back while the
+        // programmatic target is still pending.
+        viewModel.headerOffsetsChanged([
+            AgendaHeaderOffset(
+                id: EZCalendarAgendaLogic.dayID(for: Fixture.date(2030, 7, 10), calendar: calendar),
+                minY: 0
+            )
+        ])
+
+        #expect(viewModel.selection == target)
+        #expect(viewModel.visibleWeekPage?.days.contains { $0.date == target } == true)
+    }
+
+    @Test("The initial list header cannot overwrite the caller's selection")
+    func initialListHeaderIsSuppressedUntilTargetArrives() {
+        let selected = Fixture.date(2030, 7, 10)
+        let stale = Fixture.date(2030, 7, 9)
+        let viewModel = makeViewModel(selection: selected)
+
+        viewModel.sectionDates = [
+            EZCalendarAgendaLogic.dayID(for: selected, calendar: calendar): selected,
+            EZCalendarAgendaLogic.dayID(for: stale, calendar: calendar): stale
+        ]
+
+        // A preference emitted by the list before its initial target is issued
+        // must not produce the yesterday → today selection bounce.
+        viewModel.headerOffsetsChanged([
+            AgendaHeaderOffset(
+                id: EZCalendarAgendaLogic.dayID(for: stale, calendar: calendar),
+                minY: 0
+            )
+        ])
+        #expect(viewModel.selection == selected)
+
+        viewModel.selectionChanged()
+        viewModel.headerOffsetsChanged([
+            AgendaHeaderOffset(
+                id: EZCalendarAgendaLogic.dayID(for: stale, calendar: calendar),
+                minY: 0
+            )
+        ])
+        #expect(viewModel.selection == selected)
+
+        viewModel.headerOffsetsChanged([
+            AgendaHeaderOffset(
+                id: EZCalendarAgendaLogic.dayID(for: selected, calendar: calendar),
+                minY: 0
+            )
+        ])
+        viewModel.headerOffsetsChanged([
+            AgendaHeaderOffset(
+                id: EZCalendarAgendaLogic.dayID(for: stale, calendar: calendar),
+                minY: 0
+            )
+        ])
+        #expect(viewModel.selection == stale)
     }
 
     // MARK: - Collapsing by dragging the handle
@@ -547,20 +625,20 @@ struct AgendaListLatchTests {
         #expect(viewModel.scrollRequest == nil)
     }
 
-    @Test("Only the first positioning skips the animation")
-    func onlyTheFirstScrollIsInstant() {
+    @Test("Calendar-driven positioning never animates the list")
+    func calendarPositioningIsAlwaysInstant() {
         let viewModel = makeViewModel(selection: Fixture.date(2030, 7, 10))
 
         viewModel.selection = Fixture.date(2030, 7, 12)
         viewModel.selectionChanged()
-        #expect(viewModel.scrollRequest?.animated == false)
+        #expect(viewModel.scrollRequest?.transition == .immediate)
 
         viewModel.headerOffsetsChanged([AgendaHeaderOffset(id: id(12), minY: 0)])
         viewModel.scrollRequest = nil
 
         viewModel.selection = Fixture.date(2030, 7, 20)
         viewModel.selectionChanged()
-        #expect(viewModel.scrollRequest?.animated == true)
+        #expect(viewModel.scrollRequest?.transition == .immediate)
     }
 }
 
@@ -610,7 +688,7 @@ struct AgendaScrollCorrectionTests {
 
         #expect(viewModel.scrollRequest?.id == id(24))
         // A correction is a jump, never an animation — the list is already there.
-        #expect(viewModel.scrollRequest?.animated == false)
+        #expect(viewModel.scrollRequest?.transition == .immediate)
         // And the near-miss must not have been read back as a selection.
         #expect(viewModel.selection == Fixture.date(2030, 7, 24))
     }
@@ -628,8 +706,8 @@ struct AgendaScrollCorrectionTests {
         #expect(viewModel.selection == Fixture.date(2030, 7, 27))
     }
 
-    @Test("Corrections are capped, so an unreachable target cannot wedge the sync")
-    func correctionsAreCapped() {
+    @Test("A stale header cannot overwrite an unresolved programmatic target")
+    func unresolvedTargetKeepsSelectionAuthoritative() {
         let viewModel = makeViewModel()
         requestScroll(viewModel, to: 31)
 
@@ -640,9 +718,10 @@ struct AgendaScrollCorrectionTests {
             viewModel.scrollRequest = nil
         }
 
-        // The latch has given up, so the list is back in charge.
+        // Until the target actually reaches the top, stale headers cannot
+        // overwrite the calendar selection.
         viewModel.headerOffsetsChanged([AgendaHeaderOffset(id: id(29), minY: 0)])
-        #expect(viewModel.selection == Fixture.date(2030, 7, 29))
+        #expect(viewModel.selection == Fixture.date(2030, 7, 31))
     }
 
     @Test("A target that has not been built yet is waited for, not corrected")

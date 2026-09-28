@@ -198,6 +198,9 @@ struct AgendaCalendarView<TitleView: View, WeekdayItemView: View, DayItemView: V
         .scrollPosition(id: $viewModel.visibleWeekID)
         .scrollIndicators(.never)
         .fixedSize(horizontal: false, vertical: true)
+        .onAppear {
+            viewModel.weekPagerAppeared()
+        }
         .onChange(of: viewModel.visibleWeekID) { _, id in
             viewModel.pagerScrolled(to: id)
         }
