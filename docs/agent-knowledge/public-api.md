@@ -109,6 +109,26 @@ A `class`, not a struct — reference semantics. Identity is `uuid` + `eventDate
 Always exactly 7 `CalendarDay`s. Carries a `uuid` regenerated on every `init`, so
 two structurally identical weeks are never `==`.
 
+## `EZCalendarAgendaView`'s `Event.ID` must be `Sendable`
+
+Added when the agenda list's iOS implementation moved to a `UITableView` /
+`NSDiffableDataSourceSnapshot` bridge (see
+[architecture.md](architecture.md#2-zero-dependencies) and
+[landmines.md #14](landmines.md#14-two-different-uicollectionview-sticky-header-mechanisms-both-failed-on-device)):
+
+```swift
+public struct EZCalendarAgendaView<Event, ...>: View where
+    Event: Identifiable,
+    Event.ID: Sendable,
+    ...
+```
+
+Swift 6 strict concurrency requires diffable data source item identifiers to
+be `Sendable`. Every realistic `Identifiable.ID` (`String`, `UUID`, `Int`,
+...) already conforms, so this is unlikely to break an existing caller — but
+it is a new constraint on a public type, not purely an internal change, and
+belongs in the next version bump's changelog as such.
+
 ## The agenda's surface
 
 `EZCalendarAgendaView` was verified the same way — a scratch package importing

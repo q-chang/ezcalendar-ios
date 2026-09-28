@@ -181,6 +181,7 @@ public struct EZCalendarAgendaView<
     HandleView
 >: View where
     Event: Identifiable,
+    Event.ID: Sendable,
     TitleView: View,
     WeekdayItemView: View,
     DayItemView: View,
@@ -287,7 +288,13 @@ public struct EZCalendarAgendaView<
             )
 
             AgendaListView(
-                viewModel: viewModel,
+                scrollRequest: $viewModel.scrollRequest,
+                handleDragChanged: viewModel.handleDragChanged,
+                handleDragEnded: viewModel.handleDragEnded,
+                sectionAppeared: viewModel.sectionAppeared,
+                scrollCommandReceived: viewModel.scrollCommandReceived,
+                visibleSectionChanged: viewModel.visibleSectionChanged,
+                listPositionSettled: viewModel.listPositionSettled,
                 sections: sections,
                 listHeaderViewContent: listHeaderViewContent,
                 eventItemViewContent: eventItemViewContent,
@@ -405,10 +412,8 @@ public struct EZCalendarAgendaView<
             selectedDate = viewModel.selection
         }
 
-        // One run loop later: the list has to exist before it can be scrolled.
-        DispatchQueue.main.async {
-            viewModel.selectionChanged()
-        }
+        // AgendaListView retains this request until its lazy content exists.
+        viewModel.selectionChanged()
     }
 
     // MARK: - Modifiers

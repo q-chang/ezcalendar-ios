@@ -179,12 +179,15 @@ struct AgendaWeekPage: Identifiable, Hashable {
 }
 
 
+/// The visual transition used when the agenda repositions its list.
+enum AgendaScrollTransition: Equatable {
+    case animated
+    case immediate
+}
+
 /// One request for the agenda list to scroll somewhere.
-///
-/// `animated` is `false` only for the very first positioning, which can be
-/// months from the top of the range — animating that would scroll visibly
-/// through every section in between.
 struct AgendaScrollRequest: Equatable {
+    let token: UUID
     let id: String
-    let animated: Bool
+    let transition: AgendaScrollTransition
 }

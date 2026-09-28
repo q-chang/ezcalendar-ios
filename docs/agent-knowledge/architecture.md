@@ -15,7 +15,7 @@ caller-supplied `@ViewBuilder`.
 | Toolchain | swift-tools-version 6.0, Swift 6 language mode |
 | Dependencies | none — Foundation and SwiftUI only |
 | Tests | `Tests/EZCalendarTests/` — agenda logic only; the month grid is untested, see [building-and-verifying.md](building-and-verifying.md) |
-| Latest tag | `1.3.1` (2026-02-10) |
+| Latest tag | `2.2.0` (2026-09-28) — see [CHANGELOG.md](../../CHANGELOG.md) |
 
 ## Design commitments
 
@@ -32,6 +32,22 @@ solely so a caller-supplied background can read as grid lines.
 
 Foundation and SwiftUI. Adding a package dependency is a design change, not an
 implementation detail.
+
+⚠️ **One documented exception.** On iOS, the agenda list's scroll positioning
+and sticky headers are a `UIViewRepresentable` bridge to `UITableView`
+(`Subviews/AgendaTableView.swift`), not pure SwiftUI. `UIKit` is a system
+framework, not a package dependency, so this does not violate the letter of
+this rule — but it is a real exception to "SwiftUI renders everything" worth
+knowing about before assuming the agenda list is portable SwiftUI code. It
+exists because SwiftUI-native scrolling (`ScrollViewReader`/
+`scrollPosition(id:anchor:)`) and two different `UICollectionView`
+sticky-header configurations all failed on device — see
+[landmines.md #12](landmines.md#12-scrollto-into-a-long-lazyvstack-lands-approximately)
+and [#14](landmines.md#14-two-different-uicollectionview-sticky-header-mechanisms-both-failed-on-device).
+SwiftUI still renders every cell and header's *content*, through
+`UIHostingConfiguration` — only identity, layout, and positioning moved to
+UIKit. macOS keeps the original SwiftUI-native `ScrollView`/`LazyVStack`
+implementation behind `#if os(iOS)`, since `UIKit` does not exist there.
 
 ### 3. Grid logic is separable from rendering
 
@@ -115,6 +131,14 @@ Sources/EZCalendar/
       EZCalendarAgendaMode.swift          .monthly / .weekly
       EZCalendarAgendaPaging.swift        programmatic paging helper (public)
       Subviews/                           calendar, list, rows, preference keys
+        AgendaListView.swift              grab handle + list container;
+                                           #if os(iOS) branches to
+                                           AgendaTableView, #else keeps the
+                                           SwiftUI-native list for macOS
+        AgendaTableView.swift             iOS only — UITableView bridge for
+                                           exact scroll positioning + sticky
+                                           headers (see architecture
+                                           commitment #2 above)
 
 Tests/EZCalendarTests/            Swift Testing suites over EZCalendarAgendaLogic
                                   and EZCalendarAgendaViewModel

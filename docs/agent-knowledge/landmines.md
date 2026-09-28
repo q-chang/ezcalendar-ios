@@ -22,6 +22,9 @@ debugging session on a bug you did not write.
 | [11](#11-geometry-probes-go-silent-off-screen) | Off-screen `GeometryReader`s stop reporting | 🔴 silent dead feature |
 | [12](#12-scrollto-into-a-long-lazyvstack-lands-approximately) | `scrollTo` lands short in a long `LazyVStack` | 🟠 wrong output |
 | [13](#13-a-draggesture-on-a-view-the-drag-moves-damps-itself) | A `DragGesture` on a view the drag moves damps itself | 🟠 wrong output |
+| [14](#14-two-different-uicollectionview-sticky-header-mechanisms-both-failed-on-device) | `UICollectionView` sticky headers didn't stick, twice, on device | 🔴 wrong output |
+| [15](#15-a-diffable-data-source-item-identifier-must-be-unique-across-the-whole-snapshot) | Diffable data source item identifiers collided across sections | 🔴 silent data loss + crash |
+| [16](#16-applyanimatingdifferences-is-not-guaranteed-synchronous) | `apply(_:animatingDifferences:)` is not guaranteed synchronous | 🟠 crash |
 
 ---
 
@@ -307,3 +310,119 @@ on-screen overlay (see #11 — the same technique, for the same reason).
 Anything else that drags a view whose position depends on the drag — a sheet, a
 resizable pane, a pull-to-reveal header — has this bug unless it names a fixed
 coordinate space.
+
+---
+
+## 14. Two different `UICollectionView` sticky-header mechanisms both failed on device
+
+After #12 forced the agenda list off SwiftUI-native `scrollTo`/`scrollPosition`
+on iOS, it moved to a `UICollectionView` bridge for exact positioning
+(`UICollectionViewCompositionalLayout` precomputes every section's frame
+up front, so `scrollToItem` cannot undershoot the way a lazy SwiftUI stack
+does). That part worked. Sticky headers did not — **twice**, with two
+different, independently correct configurations:
+
+```swift
+// ❌ attempt 1: hand-rolled boundary supplementary item, zIndex included
+let header = NSCollectionLayoutBoundarySupplementaryItem(
+    layoutSize: headerSize, elementKind: kind, alignment: .top
+)
+header.pinToVisibleBounds = true
+header.zIndex = 1
+
+// ❌ attempt 2: Apple's own most-exercised sticky-header layout
+var configuration = UICollectionLayoutListConfiguration(appearance: .plain)
+configuration.headerMode = .supplementary
+NSCollectionLayoutSection.list(using: configuration, layoutEnvironment: layoutEnvironment)
+```
+
+Both reproduced the **same** symptom on device, confirmed by screen
+recording, not suspicion: a day's header scrolled away with its own content
+instead of pinning to the top edge, exactly like the header pin had never
+been configured at all.
+
+Two different, correctly-configured mechanisms failing identically points at
+something about how *this package's* `UIViewRepresentable` bridge hosts
+`UICollectionView`, not at either layout's configuration — but neither
+attempt's actual root cause was ever isolated on device; the investigation
+moved to `UITableView` instead of a third `UICollectionView` guess.
+
+**`UITableView` sticks section headers by default**, with no pinning
+property to configure at all — that has been `.plain`-style behavior since
+iOS 2. The agenda list on iOS is now a `UITableView` bridge
+(`Subviews/AgendaTableView.swift`). If a future change needs
+`UICollectionView` specifically (e.g. a multi-column agenda layout), budget
+real device time to isolate *why* pinning failed here before trusting any
+configuration of it — "should stick per the Apple sample" was tried twice
+and was wrong both times.
+
+---
+
+## 15. A diffable data source item identifier must be unique across the *whole* snapshot
+
+`NSDiffableDataSourceSnapshot` requires item identifiers to be unique across
+the entire snapshot — not just within the section you append them to. This
+package's agenda list has one row for an empty day with no associated
+per-day data:
+
+```swift
+// ❌ every empty day collides on the exact same identifier
+enum RowID: Hashable {
+    case event(Event.ID)
+    case empty
+}
+snapshot.appendItems([.empty], toSection: section.id)
+```
+
+With dozens of empty days in a typical calendar range, only the **first**
+empty day keeps the `.empty` identifier; every later empty section silently
+ends up with **zero items** in the live snapshot. Nothing warns about this
+at `apply(_:)` time. It surfaces later and unrelatedly: `scrollToItem`/
+`scrollToRow` has no clamping behavior for a 0-item section, and crashes
+outright the moment the user scrolls to one —
+`"Attempted to scroll ... to an out-of-bounds item (0) when there are only
+0 items in section 303"` — with a section index that looks like it should
+be a data-source-sync bug, not an identity collision.
+
+Fix: give the sentinel case a disambiguating associated value.
+
+```swift
+// ✅ unique per section
+enum RowID: Hashable {
+    case event(Event.ID)
+    case empty(String)   // the section id
+}
+snapshot.appendItems([.empty(section.id)], toSection: section.id)
+```
+
+Any enum case used as a diffable item identifier that carries no data of
+its own is a candidate for this bug — it needs *something* unique per use,
+even if nothing in the row's content actually depends on it.
+
+---
+
+## 16. `apply(_:animatingDifferences:)` is not guaranteed synchronous
+
+`UICollectionViewDiffableDataSource`/`UITableViewDiffableDataSource`'s
+`apply(_:animatingDifferences:)` can commit on a later run-loop turn even
+with `animatingDifferences: false`. Code that applies a snapshot and then,
+in the same function, reads the collection/table view's live counts
+(`numberOfItems(inSection:)`, `numberOfRows(inSection:)`) to decide where to
+scroll can read *stale* counts — the two were briefly suspected of being the
+real cause of #15's crash, and ruling that out cost a full extra attempt
+before the actual identity-collision bug was found.
+
+`applySnapshotUsingReloadData(_:)` reloads synchronously (it is a thin
+wrapper over `reloadData()`), so a read of live counts immediately
+afterward is guaranteed current:
+
+```swift
+// ✅ safe to read tableView.numberOfRows(inSection:) on the next line
+dataSource.applySnapshotUsingReloadData(snapshot)
+```
+
+Worth keeping even after #15's fix, as a second line of defense: a
+defensive `numberOfRows(inSection:) > 0` recheck (forcing one more
+`reloadData()` if it disagrees) still guards `AgendaTableView`'s
+`scrollToRow` call, in case `self.sections` and the live table view ever
+desync for an unrelated reason in the future.
