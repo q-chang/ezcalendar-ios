@@ -6,10 +6,19 @@ authoritative package version.
 ## Unreleased
 
 ### ✨ Features
+- Added `.selectableDateRange(_:)` to `EZCalendarAgendaView` so callers can
+  constrain which calendar days can be selected. Out-of-range days remain
+  visible, expose `isSelectable == false` through `EZCalendarDayContext`, and
+  ignore taps.
 
 ### 🐛 Fixes
+- Kept agenda selection and list scrolling within the configured date range.
+  The final selectable day no longer scrolls into a viewport-sized blank area
+  after the last section.
 
 ### 📚 Documentation
+- Documented the selectable date range modifier and its behavior in the README
+  and public API guide.
 
 ### ⚠️ Breaking changes
 - None.

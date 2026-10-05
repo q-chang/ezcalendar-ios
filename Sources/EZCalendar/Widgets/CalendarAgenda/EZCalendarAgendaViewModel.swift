@@ -200,6 +200,9 @@ final class EZCalendarAgendaViewModel: ObservableObject {
     /// The selected day, always normalised to the start of the day.
     @Published var selection: Date
 
+    /// Optional inclusive range that constrains taps, paging and list sync.
+    var selectableDateRange: ClosedRange<Date>?
+
     init(calendar: Calendar, mode: EZCalendarAgendaMode, selection: Date) {
         self.calendar = calendar
         self.mode = mode
@@ -325,6 +328,7 @@ final class EZCalendarAgendaViewModel: ObservableObject {
     /// Updates the selected day and optionally collapses a monthly calendar.
     func selectDay(_ date: Date, collapseOnSelection: Bool = true) {
         let selectedDate = calendar.startOfDay(for: date)
+        guard isSelectable(selectedDate) else { return }
         let shouldCollapse = mode == .monthly && collapseOnSelection
 
         syncLogger.debug("calendar-tap selected=\(EZCalendarAgendaLogic.dayID(for: selectedDate, calendar: self.calendar), privacy: .public) mode=\(String(describing: self.mode), privacy: .public) collapses=\(shouldCollapse, privacy: .public)")
@@ -600,7 +604,7 @@ final class EZCalendarAgendaViewModel: ObservableObject {
             calendar: calendar
         ) else { return }
 
-        selection = newSelection
+        selection = constrainedSelection(newSelection)
     }
 
     /// The user swiped the pager. Applies the mode's selection rule:
@@ -641,7 +645,7 @@ final class EZCalendarAgendaViewModel: ObservableObject {
               !calendar.isDate(newSelection, inSameDayAs: selection)
         else { return }
 
-        selection = newSelection
+        selection = constrainedSelection(newSelection)
     }
 
     /// Called by the weekly pager after it has mounted. A run-loop yield gives
@@ -764,11 +768,28 @@ final class EZCalendarAgendaViewModel: ObservableObject {
 
         guard isAcceptingListSelection,
               let date = sectionDates[id],
+              isSelectable(date),
               !calendar.isDate(date, inSameDayAs: selection)
         else { return }
 
         syncLogger.debug("user-list position-updated id=\(id, privacy: .public)")
         selection = date
+    }
+
+    func isSelectable(_ date: Date) -> Bool {
+        guard let selectableDateRange else { return true }
+        let day = calendar.startOfDay(for: date)
+        return day >= calendar.startOfDay(for: selectableDateRange.lowerBound)
+            && day <= calendar.startOfDay(for: selectableDateRange.upperBound)
+    }
+
+    func constrainedSelection(_ date: Date) -> Date {
+        let day = calendar.startOfDay(for: date)
+        guard let selectableDateRange else { return day }
+
+        let lowerBound = calendar.startOfDay(for: selectableDateRange.lowerBound)
+        let upperBound = calendar.startOfDay(for: selectableDateRange.upperBound)
+        return min(max(day, lowerBound), upperBound)
     }
 
     /// Called once the list's positioning is complete — on macOS, after the
