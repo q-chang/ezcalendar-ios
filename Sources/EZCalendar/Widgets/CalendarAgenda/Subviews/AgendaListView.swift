@@ -50,6 +50,7 @@ struct AgendaListView<Event: Identifiable, ListHeaderView: View, EventItemView: 
 
     let sections: [EZCalendarAgendaSection<Event>]
     let contentRevision: Int
+    let hasSelectableDateRange: Bool
 
     let listHeaderViewContent: (EZCalendarAgendaSection<Event>) -> ListHeaderView
     let eventItemViewContent: (Event) -> EventItemView
@@ -115,6 +116,7 @@ struct AgendaListView<Event: Identifiable, ListHeaderView: View, EventItemView: 
             listPositionSettled: listPositionSettled,
             listPositionFailed: listPositionFailed,
             contentRevision: contentRevision,
+            hasSelectableDateRange: hasSelectableDateRange,
             listHeaderViewContent: listHeaderViewContent,
             eventItemViewContent: eventItemViewContent,
             emptyDayViewContent: emptyDayViewContent
@@ -144,7 +146,9 @@ struct AgendaListView<Event: Identifiable, ListHeaderView: View, EventItemView: 
                         }
                     }
 
-                    Color.clear.frame(height: geometry.size.height)
+                    if !hasSelectableDateRange {
+                        Color.clear.frame(height: geometry.size.height)
+                    }
                 }
                 .scrollTargetLayout()
             }

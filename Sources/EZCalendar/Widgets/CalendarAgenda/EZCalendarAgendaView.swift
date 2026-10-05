@@ -232,6 +232,7 @@ public struct EZCalendarAgendaView<
     private var collapseVelocityThreshold: Double = 350
     private var collapseAnimation: Animation = .easeOut(duration: 0.3)
     private var collapseOnDaySelection = true
+    private var selectableDateRange: ClosedRange<Date>?
     private var refreshConfiguration: AgendaRefreshConfiguration?
 
     public init(
@@ -303,6 +304,7 @@ public struct EZCalendarAgendaView<
                 listPositionFailed: viewModel.listPositionFailed,
                 sections: sections,
                 contentRevision: eventsRevision,
+                hasSelectableDateRange: selectableDateRange != nil,
                 listHeaderViewContent: listHeaderViewContent,
                 eventItemViewContent: eventItemViewContent,
                 emptyDayViewContent: emptyDayViewContent,
@@ -320,6 +322,15 @@ public struct EZCalendarAgendaView<
             viewModel.reanchorSelection()
         }
         .onChange(of: eventsRevision) { _, _ in
+            rebuildSections()
+            viewModel.reanchorSelection()
+        }
+        .onChange(of: selectableDateRange) { _, range in
+            viewModel.selectableDateRange = range
+            let constrained = viewModel.constrainedSelection(viewModel.selection)
+            if constrained != viewModel.selection {
+                viewModel.selection = constrained
+            }
             rebuildSections()
             viewModel.reanchorSelection()
         }
@@ -342,7 +353,8 @@ public struct EZCalendarAgendaView<
         }
         .onChange(of: selectedDate) { _, newDate in
             let normalised = calendar.startOfDay(for: newDate)
-            if viewModel.selection != normalised { viewModel.selection = normalised }
+            let constrained = viewModel.constrainedSelection(normalised)
+            if viewModel.selection != constrained { viewModel.selection = constrained }
         }
     }
 
@@ -372,7 +384,8 @@ public struct EZCalendarAgendaView<
             isToday: calendar.isDateInToday(date),
             // Same-day matching against the agenda's own events, so padding days
             // and events stamped at a real time of day both work.
-            hasEvents: daysWithEvents.contains(EZCalendarAgendaLogic.dayID(for: date, calendar: calendar))
+            hasEvents: daysWithEvents.contains(EZCalendarAgendaLogic.dayID(for: date, calendar: calendar)),
+            isSelectable: viewModel.isSelectable(date)
         )
     }
 
@@ -400,17 +413,23 @@ public struct EZCalendarAgendaView<
             calendar: calendar
         )
 
-        sections = index.sections
+        sections = EZCalendarAgendaLogic.sections(
+            index.sections,
+            within: selectableDateRange,
+            calendar: calendar
+        )
         daysWithEvents = index.daysWithEvents
 
         // The view model turns a reported header id back into a day with this.
         viewModel.sectionDates = Dictionary(
-            index.sections.map { ($0.id, $0.date) },
+            sections.map { ($0.id, $0.date) },
             uniquingKeysWith: { first, _ in first }
         )
     }
 
     private func start() {
+        viewModel.selectableDateRange = selectableDateRange
+        viewModel.selection = viewModel.constrainedSelection(viewModel.selection)
         viewModel.collapseThreshold = collapseThreshold
         viewModel.collapseVelocityThreshold = collapseVelocityThreshold
         viewModel.collapseAnimation = collapseAnimation
@@ -481,6 +500,16 @@ public struct EZCalendarAgendaView<
     public func collapseOnDaySelection(_ enabled: Bool) -> Self {
         var view = self
         view.collapseOnDaySelection = enabled
+        return view
+    }
+
+    /// Limits day selection and agenda-list scrolling to an inclusive date
+    /// range. Out-of-range calendar cells remain visible, are marked
+    /// `isSelectable == false` in `EZCalendarDayContext`, and are ignored when
+    /// tapped. A selection outside the range is clamped to the nearest endpoint.
+    public func selectableDateRange(_ range: ClosedRange<Date>?) -> Self {
+        var view = self
+        view.selectableDateRange = range
         return view
     }
 

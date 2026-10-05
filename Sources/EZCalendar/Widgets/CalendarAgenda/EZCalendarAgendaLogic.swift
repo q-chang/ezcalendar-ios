@@ -283,6 +283,24 @@ enum EZCalendarAgendaLogic {
         return AgendaEventIndex(sections: sections, daysWithEvents: daysWithEvents)
     }
 
+    /// Keeps agenda scrolling inside an optional inclusive day range.
+    /// The bounds are normalised to calendar days so a time on the final day
+    /// still includes that entire day.
+    static func sections<Event>(
+        _ sections: [EZCalendarAgendaSection<Event>],
+        within range: ClosedRange<Date>?,
+        calendar: Calendar
+    ) -> [EZCalendarAgendaSection<Event>] {
+        guard let range else { return sections }
+
+        let lowerBound = calendar.startOfDay(for: range.lowerBound)
+        let upperBound = calendar.startOfDay(for: range.upperBound)
+        return sections.filter { section in
+            let day = calendar.startOfDay(for: section.date)
+            return day >= lowerBound && day <= upperBound
+        }
+    }
+
     /// Earliest day the list covers: the 1st of the first paged month, pulled
     /// back further if an event predates it.
     private static func rangeStart(

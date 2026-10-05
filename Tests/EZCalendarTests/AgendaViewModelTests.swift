@@ -401,6 +401,39 @@ struct AgendaViewModelTests {
 
     // MARK: - List → calendar
 
+    @Test("A list scroll past a Sunday range endpoint cannot move selection out of range")
+    func listScrollPastSundayRangeEndpointIsIgnored() {
+        let finalSelectableDay = Fixture.date(2030, 7, 28) // Sunday, the grid's first weekday.
+        let nextDay = Fixture.date(2030, 7, 29)
+        #expect(calendar.component(.weekday, from: finalSelectableDay) == 1)
+
+        let viewModel = makeViewModel(selection: finalSelectableDay)
+        viewModel.selectableDateRange = Fixture.date(2030, 7, 1)...finalSelectableDay
+        let finalID = EZCalendarAgendaLogic.dayID(for: finalSelectableDay, calendar: calendar)
+        let nextID = EZCalendarAgendaLogic.dayID(for: nextDay, calendar: calendar)
+        viewModel.sectionDates = [finalID: finalSelectableDay, nextID: nextDay]
+
+        // Complete the initial positioning so subsequent section changes
+        // represent a user scrolling the agenda list.
+        viewModel.selectionChanged()
+        viewModel.listPositionSettled()
+        viewModel.visibleSectionChanged(nextID)
+
+        #expect(viewModel.selection == finalSelectableDay)
+    }
+
+    @Test("Tapping a day after the selectable endpoint is ignored")
+    func tappingAfterSelectableEndpointIsIgnored() {
+        let finalSelectableDay = Fixture.date(2030, 7, 28)
+        let viewModel = makeViewModel(selection: finalSelectableDay)
+        viewModel.selectableDateRange = Fixture.date(2030, 7, 1)...finalSelectableDay
+
+        viewModel.selectDay(Fixture.date(2030, 7, 29))
+
+        #expect(viewModel.selection == finalSelectableDay)
+        #expect(viewModel.mode == .monthly)
+    }
+
     @Test("The list's pinned header moves the calendar's selection")
     func pinnedHeaderDrivesTheSelection() {
         let viewModel = makeViewModel()
