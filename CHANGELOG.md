@@ -6,6 +6,22 @@ authoritative package version.
 ## Unreleased
 
 ### ✨ Features
+
+### 🐛 Fixes
+
+### 📚 Documentation
+
+### ⚠️ Breaking changes
+- None.
+
+### Installation
+```swift
+.package(url: "https://github.com/q-chang/ezcalendar-ios", from: "NEXT_VERSION")
+```
+
+## EZCalendar 2.2.2
+
+### ✨ Features
 - Added `.selectableDateRange(_:)` to `EZCalendarAgendaView` so callers can
   constrain which calendar days can be selected. Out-of-range days remain
   visible, expose `isSelectable == false` through `EZCalendarDayContext`, and
@@ -25,7 +41,7 @@ authoritative package version.
 
 ### Installation
 ```swift
-.package(url: "https://github.com/q-chang/ezcalendar-ios", from: "NEXT_VERSION")
+.package(url: "https://github.com/q-chang/ezcalendar-ios", from: "2.2.2")
 ```
 
 ## EZCalendar 2.2.1
