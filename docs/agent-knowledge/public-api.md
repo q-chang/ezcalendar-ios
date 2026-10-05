@@ -20,7 +20,7 @@ as an external module — not by reading modifiers.
 | `EZCalendarItemView.gridLineColor(_:)` | ❌ **internal** |
 | `EZCalendarWeekdayHeaderView` | ⚠️ type public, **`init` internal** |
 | `EZCalendarHorizontalPagingView` + `init` + `.gridLineColor` + `.weekdayScrollable` | ✅ |
-| `EZCalendarAgendaView` + both `init`s + `.gridLineColor` + `.collapseThreshold` + `.collapseAnimation` + `.collapseOnDaySelection` + `.pullToRefresh` | ✅ |
+| `EZCalendarAgendaView` + both `init`s + `.gridLineColor` + `.collapseThreshold` + `.collapseAnimation` + `.collapseOnDaySelection` + `.selectableDateRange` + `.pullToRefresh` | ✅ |
 | `EZCalendarAgendaMode`, `EZCalendarAgendaPaging` | ✅ |
 | `EZCalendarDayContext`, `EZCalendarAgendaSection`, `EZCalendarAgendaTitleContext`, `EZCalendarAgendaRefreshContext` | ✅ read only — received, never constructed |
 | `EZCalendarAgendaRefreshPhase` | ✅ |

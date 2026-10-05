@@ -20,6 +20,7 @@ import Foundation
  | `isSelected` | Same calendar day as the view's `selectedDate` binding. |
  | `isToday` | Same calendar day as the real-world today. |
  | `hasEvents` | Recomputed by the agenda view — **see the note below**. |
+ | `isSelectable` | `false` when the day is outside `.selectableDateRange(_:)`. |
 
  ## ⚠️ Prefer `context.hasEvents` over `context.day.hasEvents`
 
@@ -60,17 +61,22 @@ public struct EZCalendarDayContext: Hashable {
     /// this day. Correct for padding days; matches on the day, not the instant.
     public let hasEvents: Bool
 
+    /// Whether this day is inside the agenda's configured selectable range.
+    /// Days outside the range are still rendered, but the agenda ignores taps on them.
+    public let isSelectable: Bool
+
     /// Convenience passthrough — `false` for days borrowed from an adjacent month.
     public var isCurrentMonth: Bool { day.isCurrentMonth }
 
     /// Convenience passthrough — `nil` only if the underlying date math failed.
     public var date: Date? { day.date }
 
-    init(day: CalendarDay, isSelected: Bool, isToday: Bool, hasEvents: Bool) {
+    init(day: CalendarDay, isSelected: Bool, isToday: Bool, hasEvents: Bool, isSelectable: Bool = true) {
         self.day = day
         self.isSelected = isSelected
         self.isToday = isToday
         self.hasEvents = hasEvents
+        self.isSelectable = isSelectable
     }
 }
 

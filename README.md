@@ -366,7 +366,7 @@ EZCalendarAgendaView(
     eventDate: { $0.scheduledAt },    // which day each event belongs to
     weekdayItemViewContent: { Text($0).frame(maxWidth: .infinity) },
     dayItemViewContent: { context in
-        DayCell(context)              // .isSelected, .isToday, .hasEvents
+        DayCell(context)              // .isSelected, .isToday, .hasEvents, .isSelectable
     },
     listHeaderViewContent: { section in
         Text(headerFormatter.string(from: section.date))
@@ -376,7 +376,16 @@ EZCalendarAgendaView(
     }
 )
 .gridLineColor(.secondary.opacity(0.1))
+.selectableDateRange(startDate...endDate)
 ```
+
+`.selectableDateRange(_:)` is inclusive. Days outside the range remain visible
+in the calendar and agenda, but taps on those days do nothing and scrolling the
+agenda list past an endpoint does not move `selectedDate` outside the range.
+The caller can use `context.isSelectable` to render out-of-range days as
+disabled. If the initial or externally assigned selection is outside the
+range, the agenda clamps it to the nearest endpoint. Omit the modifier (or pass
+`nil`) to allow selection across the full supplied calendar.
 
 The longer initializer adds `titleViewContent`, `emptyDayViewContent` and `handleViewContent`.
 
@@ -447,6 +456,7 @@ Page it programmatically with `EZCalendarAgendaPaging.selection(paging:from:mode
 | `.collapseVelocityThreshold(_:)` | `350` | How fast it must be flicked (points/second) to commit regardless of distance. `0` disables the flick. |
 | `.collapseAnimation(_:)` | `.easeOut(duration: 0.3)` | How a released gesture settles. |
 | `.collapseOnDaySelection(_:)` | `true` | Whether tapping a day while in `.monthly` switches the calendar to `.weekly`. |
+| `.selectableDateRange(_:)` | `nil` | Inclusive date range for selection; taps and list scrolling cannot select a day outside it. |
 | `.pullToRefresh(minimumDisplayDuration:indicator:onRefresh:)` | disabled | Adds caller-styled refresh to a downward vertical pull in the calendar area. The duration is clamped to 1...3 seconds. |
 
 > **Use `context.hasEvents`, not `context.day.hasEvents`.** The agenda buckets your events by *day*, so its flag works for events stamped at a real time and for padding days — neither of which `CalendarDay.hasEvents` handles. See limitation 2 below.

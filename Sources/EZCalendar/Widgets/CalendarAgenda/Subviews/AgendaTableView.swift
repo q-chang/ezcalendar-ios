@@ -68,6 +68,7 @@ struct AgendaTableView<
     let listPositionSettled: () -> Void
     let listPositionFailed: () -> Void
     let contentRevision: Int
+    let hasSelectableDateRange: Bool
 
     let listHeaderViewContent: (EZCalendarAgendaSection<Event>) -> ListHeaderView
     let eventItemViewContent: (Event) -> EventItemView
@@ -117,18 +118,16 @@ struct AgendaTableView<
         return tableView
     }
 
-    /// Keeps one screen height of empty trailing space below the last
-    /// section — the UIKit equivalent of the SwiftUI-native implementation's
-    /// trailing `Color.clear` row. Without it, `scrollToRow` cannot bring a
-    /// section near the end of the range flush to the top: `UIScrollView`
-    /// clamps the offset once content runs out, so the target would land
-    /// short through no fault of the positioning call itself.
+    /// Keeps the table's trailing scroll space in sync with the optional
+    /// selectable range. Bounded lists must not scroll into a viewport-sized
+    /// blank area after their final selectable day.
     private final class TrailingInsetTableView: UITableView {
         var didLayout: (() -> Void)?
+        var allowsTrailingScrollSpace = true
 
         override func layoutSubviews() {
             super.layoutSubviews()
-            let desired = bounds.height
+            let desired = allowsTrailingScrollSpace ? bounds.height : 0
             if abs(contentInset.bottom - desired) > 1 {
                 contentInset.bottom = desired
             }
@@ -137,6 +136,7 @@ struct AgendaTableView<
     }
 
     func updateUIView(_ tableView: UITableView, context: Context) {
+        (tableView as? TrailingInsetTableView)?.allowsTrailingScrollSpace = !hasSelectableDateRange
         let coordinator = context.coordinator
         coordinator.listHeaderViewContent = listHeaderViewContent
         coordinator.eventItemViewContent = eventItemViewContent

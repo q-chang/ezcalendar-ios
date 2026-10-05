@@ -48,6 +48,28 @@ struct AgendaListSyncTests {
         }
     }
 
+    @Test("Selectable range trims agenda sections at a Sunday endpoint")
+    func selectableRangeTrimsSectionsAtSundayEndpoint() {
+        let index = EZCalendarAgendaLogic.eventIndex(
+            events: [TestEvent](),
+            eventDate: \.date,
+            monthPages: Fixture.monthPages([(7, 2030)]),
+            calendar: calendar
+        )
+        let lowerBound = Fixture.dateTime(2030, 7, 1, 15, 0)
+        let finalSelectableDay = Fixture.dateTime(2030, 7, 28, 19, 0) // Sunday.
+
+        let boundedSections = EZCalendarAgendaLogic.sections(
+            index.sections,
+            within: lowerBound...finalSelectableDay,
+            calendar: calendar
+        )
+
+        #expect(boundedSections.first?.date == Fixture.date(2030, 7, 1))
+        #expect(boundedSections.last?.date == Fixture.date(2030, 7, 28))
+        #expect(boundedSections.allSatisfy { $0.date <= Fixture.date(2030, 7, 28) })
+    }
+
     @Test("An event stamped at a real time of day still lands on its own day")
     func eventsAreBucketedByDayNotByInstant() {
         let event = TestEvent(id: 1, date: Fixture.dateTime(2026, 7, 16, 9, 0))
